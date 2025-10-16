@@ -17,13 +17,19 @@ def run_backend():
 def pytest_configure(config):
     global thread
     print("frontend begin test")
-    thread = threading.Thread(target=run_backend)
+    # Run backend in a daemon thread to avoid teardown hang
+    thread = threading.Thread(target=run_backend, daemon=True)
     thread.start()
     init_completed_event.wait()
 
 
 def pytest_unconfigure(config):
     url = urljoin(conf.URL, "shutdown")
-    requests.get(url)
-    thread.join()
+    try:
+        # Ensure we don't block indefinitely if shutdown route is unavailable
+        requests.get(url, timeout=3)
+    except Exception:
+        pass
+    # Avoid indefinite blocking; daemon thread allows process exit
+    thread.join(timeout=5)
     print("frontend end test")

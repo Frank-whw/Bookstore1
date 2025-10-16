@@ -19,7 +19,10 @@ def jwt_encode(user_id: str, terminal: str) -> str:
         key=user_id,
         algorithm="HS256",
     )
-    return encoded.decode("utf-8")
+    # PyJWT v1 returns bytes; PyJWT v2+ returns str
+    if isinstance(encoded, bytes):
+        return encoded.decode("utf-8")
+    return encoded
 
 
 # decode a JWT to a json string like:
@@ -29,7 +32,7 @@ def jwt_encode(user_id: str, terminal: str) -> str:
 #       "timestamp": [ts]} to a JWT
 #   }
 def jwt_decode(encoded_token, user_id: str) -> str:
-    decoded = jwt.decode(encoded_token, key=user_id, algorithms="HS256")
+    decoded = jwt.decode(encoded_token, key=user_id, algorithms=["HS256"])
     return decoded
 
 
