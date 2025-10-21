@@ -9,8 +9,8 @@ from be.model import db_conn
 #   {
 #       "user_id": [user name],
 #       "terminal": [terminal code],
-#       "timestamp": [ts]} to a JWT
-#   }
+#       "timestamp": [ts]
+#   }to a JWT
 
 
 def jwt_encode(user_id: str, terminal: str) -> str:
@@ -29,7 +29,7 @@ def jwt_encode(user_id: str, terminal: str) -> str:
 #   {
 #       "user_id": [user name],
 #       "terminal": [terminal code],
-#       "timestamp": [ts]} to a JWT
+#       "timestamp": [ts]
 #   }
 def jwt_decode(encoded_token, user_id: str) -> str:
     decoded = jwt.decode(encoded_token, key=user_id, algorithms=["HS256"])

@@ -3,6 +3,8 @@ from flask import request
 from flask import jsonify
 from be.model import user
 
+# Blueprint是Flask中的一种组织代码的方式，它可以将相关的路由和视图函数组织在一起。
+# 将应用程序分解为多个模块，每个模块都有自己的路由和视图函数。
 bp_auth = Blueprint("auth", __name__, url_prefix="/auth")
 
 
