@@ -8,9 +8,9 @@
   - [ ] 适配MongoDB的订单创建逻辑
   - [ ] 实现订单状态管理（发货/收货）
   - [ ] 添加订单查询和取消功能
-- [ ] 修改[db_conn.py](be/model/db_conn.py) - 数据库连接层
-  - [ ] 替换SQLite连接为MongoDB连接
-  - [ ] 实现MongoDB基础操作封装
+- [x] 修改[db_conn.py](be/model/db_conn.py) - 数据库连接层 10.27
+  - [x] 替换SQLite连接为MongoDB连接
+  - [x] 实现MongoDB基础操作封装
 - [ ] 修改[error.py](be/model/error.py) - 错误处理
   - [ ] 添加MongoDB相关错误处理
   - [ ] 添加订单状态相关错误码
