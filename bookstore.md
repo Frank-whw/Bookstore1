@@ -4,10 +4,10 @@
   - [x] 创建MongoDB连接配置
   - [x] 编写数据迁移脚本
   - [x] 从SQLite导入book.db数据到MongoDB
-- [ ] 修改[buyer.py](be/model/buyer.py) - 买家相关业务逻辑
-  - [ ] 适配MongoDB的订单创建逻辑
-  - [ ] 实现订单状态管理（发货/收货）
-  - [ ] 添加订单查询和取消功能
+- [x] 修改[buyer.py](be/model/buyer.py) - 买家相关业务逻辑 10.27
+  - [x] 适配MongoDB的订单创建逻辑
+  - [x] 实现订单状态管理（发货/收货）
+  - [x] 添加订单查询和取消功能
 - [x] 修改[db_conn.py](be/model/db_conn.py) - 数据库连接层 10.27
   - [x] 替换SQLite连接为MongoDB连接
   - [x] 实现MongoDB基础操作封装
