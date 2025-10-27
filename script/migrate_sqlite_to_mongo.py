@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import sqlite3
+import datetime
 from typing import Dict, List, Optional, Tuple
 
 try:
@@ -228,23 +229,50 @@ def migrate_orders(be_conn: sqlite3.Connection, mongo_db, dry_run: bool) -> int:
             (order_id,),
         )
         for dr in dcur:
+            # 获取书籍快照（来自 store 表的 book_info）
+            snapshot = {"title": None, "tag": None, "content": None}
+            try:
+                prow = be_conn.execute(
+                    "SELECT book_info FROM store WHERE store_id=? AND book_id=? LIMIT 1",
+                    (r["store_id"], dr["book_id"]),
+                ).fetchone()
+                info = json.loads(prow["book_info"]) if (prow and prow["book_info"]) else None
+                if isinstance(info, dict):
+                    snapshot = {
+                        "title": info.get("title"),
+                        "tag": first_tag(info.get("tags")),
+                        "content": info.get("content") or info.get("book_intro") or info.get("author_intro"),
+                    }
+            except Exception:
+                pass
             items.append(
                 {
                     "book_id": dr["book_id"],
-                    "count": int(dr["count"]) if dr["count"] is not None else 0,
-                    "price": int(dr["price"]) if dr["price"] is not None else 0,
+                    "quantity": int(dr["count"]) if dr["count"] is not None else 0,
+                    "unit_price": int(dr["price"]) if dr["price"] is not None else 0,
+                    "book_snapshot": snapshot,
                 }
             )
-        total = sum(i["count"] * i["price"] for i in items)
+        total_amount = sum(i["quantity"] * i["unit_price"] for i in items)
         doc = {
             "_id": order_id,
-            "user_id": r["user_id"],
+            "buyer_id": r["user_id"],
             "store_id": r["store_id"],
             "items": items,
-            "total_price": total,
-            "status": "created",
+            "total_amount": total_amount,
+            "status": "unpaid",
+            "create_time": datetime.datetime.utcnow(),
+            "pay_time": None,
+            "ship_time": None,
+            "deliver_time": None,
+            "cancel_time": None,
+            "timeout_at": None,
         }
-        mongo_db.Orders.update_one({"_id": doc["_id"]}, {"$set": doc}, upsert=True)
+        mongo_db.Orders.update_one(
+            {"_id": doc["_id"]},
+            {"$set": doc, "$unset": {"user_id": "", "total_price": ""}},
+            upsert=True,
+        )
         count += 1
     logging.info(f"orders migrated: {count}")
     return count
@@ -318,8 +346,9 @@ def create_indexes(mongo_db):
     try:
         mongo_db.Users.create_index([("token", ASCENDING)], sparse=True)
         mongo_db.Stores.create_index([("user_id", ASCENDING)])
-        mongo_db.Orders.create_index([("user_id", ASCENDING)])
+        mongo_db.Orders.create_index([("buyer_id", ASCENDING)])
         mongo_db.Orders.create_index([("store_id", ASCENDING)])
+        mongo_db.Orders.create_index([("status", ASCENDING)])
         mongo_db.Books.create_index([("search_index.title_lower", ASCENDING)])
         mongo_db.Books.create_index([("search_index.author_lower", ASCENDING)])
         mongo_db.Books.create_index([("search_index.tags_lower", ASCENDING)])

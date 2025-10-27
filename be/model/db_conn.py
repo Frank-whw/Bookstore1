@@ -1,7 +1,5 @@
-from pyclbr import Class
 import pymongo
 
-from fe.access import book
 
 class DBConn:
     def __init__(self):
