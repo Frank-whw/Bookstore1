@@ -1,9 +1,10 @@
 import jwt
 import time
 import logging
-import sqlite3 as sqlite
+import pymongo
 from be.model import error
 from be.model import db_conn
+from fe.access import book
 
 # encode a json string like:
 #   {
@@ -11,8 +12,6 @@ from be.model import db_conn
 #       "terminal": [terminal code],
 #       "timestamp": [ts]
 #   }to a JWT
-
-
 def jwt_encode(user_id: str, terminal: str) -> str:
     encoded = jwt.encode(
         {"user_id": user_id, "terminal": terminal, "timestamp": time.time()},
@@ -35,14 +34,11 @@ def jwt_decode(encoded_token, user_id: str) -> str:
     decoded = jwt.decode(encoded_token, key=user_id, algorithms=["HS256"])
     return decoded
 
-
 class User(db_conn.DBConn):
-    token_lifetime: int = 3600  # 3600 second
-
+    token_lifetime: int = 3600 # 3600 second
     def __init__(self):
-        db_conn.DBConn.__init__(self)
-
-    def __check_token(self, user_id, db_token, token) -> bool:
+        super().__init__()
+    def __check_token__(self, user_id: str, db_token: str, token: str) -> bool:
         try:
             if db_token != token:
                 return False
@@ -55,42 +51,39 @@ class User(db_conn.DBConn):
         except jwt.exceptions.InvalidSignatureError as e:
             logging.error(str(e))
             return False
-
-    def register(self, user_id: str, password: str):
+    
+    def register(self, user_id: str, password: str) -> (int, str):
         try:
             terminal = "terminal_{}".format(str(time.time()))
             token = jwt_encode(user_id, terminal)
-            self.conn.execute(
-                "INSERT into user(user_id, password, balance, token, terminal) "
-                "VALUES (?, ?, ?, ?, ?);",
-                (user_id, password, 0, token, terminal),
-            )
-            self.conn.commit()
-        except sqlite.Error:
-            return error.error_exist_user_id(user_id)
+            user = {
+                "_id": user_id,
+                "password": password,
+                "balance": 0,
+                "token": token,
+                "terminal": terminal
+            }
+            self.conn[bookstore][Users].insert_one(user)
+        except pymongo.errors.PyMongoError as e:
+            return 528, "{}".format(str(e))
         return 200, "ok"
-
+    
     def check_token(self, user_id: str, token: str) -> (int, str):
-        cursor = self.conn.execute("SELECT token from user where user_id=?", (user_id,))
-        row = cursor.fetchone()
-        if row is None:
-            return error.error_authorization_fail()
-        db_token = row[0]
-        if not self.__check_token(user_id, db_token, token):
+        user_doc = self.conn[bookstore][Users].find_one({"_id": user_id})
+        if user_doc is None:
+            return error.error_non_exist_user_id(user_id)
+        db_token = user_doc.get("token")
+        if not self.__check_token__(user_id, db_token, token):
             return error.error_authorization_fail()
         return 200, "ok"
-
+    
     def check_password(self, user_id: str, password: str) -> (int, str):
-        cursor = self.conn.execute(
-            "SELECT password from user where user_id=?", (user_id,)
-        )
-        row = cursor.fetchone()
-        if row is None:
+        user_doc = self.conn[bookstore][Users].find_one({"_id": user_id})
+        if user_doc is None:
+            return error.error_non_exist_user_id(user_id)
+        db_password = user_doc.get("password")
+        if db_password != password:
             return error.error_authorization_fail()
-
-        if password != row[0]:
-            return error.error_authorization_fail()
-
         return 200, "ok"
 
     def login(self, user_id: str, password: str, terminal: str) -> (int, str, str):
@@ -101,14 +94,12 @@ class User(db_conn.DBConn):
                 return code, message, ""
 
             token = jwt_encode(user_id, terminal)
-            cursor = self.conn.execute(
-                "UPDATE user set token= ? , terminal = ? where user_id = ?",
-                (token, terminal, user_id),
-            )
-            if cursor.rowcount == 0:
-                return error.error_authorization_fail() + ("",)
-            self.conn.commit()
-        except sqlite.Error as e:
+            self.conn[bookstore][Users].update_one({
+                "_id": user_id
+            },{
+                "$set":{"token": token}
+            })
+        except pymongo.errors.PyMongoError as e:
             return 528, "{}".format(str(e)), ""
         except BaseException as e:
             return 530, "{}".format(str(e)), ""
@@ -123,15 +114,15 @@ class User(db_conn.DBConn):
             terminal = "terminal_{}".format(str(time.time()))
             dummy_token = jwt_encode(user_id, terminal)
 
-            cursor = self.conn.execute(
-                "UPDATE user SET token = ?, terminal = ? WHERE user_id=?",
-                (dummy_token, terminal, user_id),
-            )
-            if cursor.rowcount == 0:
-                return error.error_authorization_fail()
-
-            self.conn.commit()
-        except sqlite.Error as e:
+            self.conn[bookstore][Users].update_one({
+                "_id": user_id
+            },{
+                "$set":{
+                    "token": dummy_token,
+                    "terminal": terminal
+                }
+            })
+        except pymongo.errors.PyMongoError as e:
             return 528, "{}".format(str(e))
         except BaseException as e:
             return 530, "{}".format(str(e))
@@ -143,12 +134,10 @@ class User(db_conn.DBConn):
             if code != 200:
                 return code, message
 
-            cursor = self.conn.execute("DELETE from user where user_id=?", (user_id,))
-            if cursor.rowcount == 1:
-                self.conn.commit()
-            else:
-                return error.error_authorization_fail()
-        except sqlite.Error as e:
+            self.conn[bookstore][Users].delete_one({
+                "_id": user_id
+            })
+        except pymongo.errors.PyMongoError as e:
             return 528, "{}".format(str(e))
         except BaseException as e:
             return 530, "{}".format(str(e))
@@ -164,15 +153,16 @@ class User(db_conn.DBConn):
 
             terminal = "terminal_{}".format(str(time.time()))
             token = jwt_encode(user_id, terminal)
-            cursor = self.conn.execute(
-                "UPDATE user set password = ?, token= ? , terminal = ? where user_id = ?",
-                (new_password, token, terminal, user_id),
-            )
-            if cursor.rowcount == 0:
-                return error.error_authorization_fail()
-
-            self.conn.commit()
-        except sqlite.Error as e:
+            self.conn[bookstore][Users].update_one({
+                "_id": user_id
+            },{
+                "$set":{
+                    "password": new_password,
+                    "token": token,
+                    "terminal": terminal
+                }
+            })
+        except pymongo.errors.PyMongoError as e:
             return 528, "{}".format(str(e))
         except BaseException as e:
             return 530, "{}".format(str(e))
