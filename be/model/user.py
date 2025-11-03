@@ -65,7 +65,7 @@ class User(db_conn.DBConn):
             }
             self.db["Users"].insert_one(user)
         except pymongo.errors.PyMongoError as e:
-            return 528, "{}".format(str(e))
+            return error.error_db_exception(e, {"op": "register", "user_id": user_id})
         return 200, "ok"
     
     def check_token(self, user_id: str, token: str) -> (int, str):
@@ -100,9 +100,11 @@ class User(db_conn.DBConn):
                 "$set":{"token": token}
             })
         except pymongo.errors.PyMongoError as e:
-            return 528, "{}".format(str(e)), ""
+            code, msg = error.error_db_exception(e, {"op": "login", "user_id": user_id})
+            return code, msg, ""
         except BaseException as e:
-            return 530, "{}".format(str(e)), ""
+            code, msg = error.error_internal_exception(e, {"op": "login", "user_id": user_id})
+            return code, msg, ""
         return 200, "ok", token
 
     def logout(self, user_id: str, token: str) -> (int, str):
@@ -123,9 +125,9 @@ class User(db_conn.DBConn):
                 }
             })
         except pymongo.errors.PyMongoError as e:
-            return 528, "{}".format(str(e))
+            return error.error_db_exception(e, {"op": "logout", "user_id": user_id})
         except BaseException as e:
-            return 530, "{}".format(str(e))
+            return error.error_internal_exception(e, {"op": "logout", "user_id": user_id})
         return 200, "ok"
 
     def unregister(self, user_id: str, password: str) -> (int, str):
@@ -138,9 +140,9 @@ class User(db_conn.DBConn):
                 "_id": user_id
             })
         except pymongo.errors.PyMongoError as e:
-            return 528, "{}".format(str(e))
+            return error.error_db_exception(e, {"op": "unregister", "user_id": user_id})
         except BaseException as e:
-            return 530, "{}".format(str(e))
+            return error.error_internal_exception(e, {"op": "unregister", "user_id": user_id})
         return 200, "ok"
 
     def change_password(
@@ -163,7 +165,7 @@ class User(db_conn.DBConn):
                 }
             })
         except pymongo.errors.PyMongoError as e:
-            return 528, "{}".format(str(e))
+            return error.error_db_exception(e, {"op": "change_password", "user_id": user_id})
         except BaseException as e:
-            return 530, "{}".format(str(e))
+            return error.error_internal_exception(e, {"op": "change_password", "user_id": user_id})
         return 200, "ok"

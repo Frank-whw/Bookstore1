@@ -11,9 +11,9 @@
 - [x] 修改[db_conn.py](be/model/db_conn.py) - 数据库连接层 10.27
   - [x] 替换SQLite连接为MongoDB连接
   - [x] 实现MongoDB基础操作封装
-- [ ] 修改[error.py](be/model/error.py) - 错误处理
-  - [ ] 添加MongoDB相关错误处理
-  - [ ] 添加订单状态相关错误码
+- [x] 修改[error.py](be/model/error.py) - 错误处理
+  - [x] 添加MongoDB相关错误处理
+  - [x] 添加订单状态相关错误码
 - [x] 修改[seller.py](be/model/seller.py) - 卖家相关业务逻辑
   - [x] 适配新的Stores集合结构
   - [ ] 实现发货功能

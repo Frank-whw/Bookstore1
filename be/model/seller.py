@@ -60,9 +60,9 @@ class Seller(db_conn.DBConn):
                 {"$push": {"inventory": book}}
             )
         except pymongo.errors.PyMongoError as e:
-            return 528, "{}".format(str(e))
+            return error.error_db_exception(e, {"op": "add_book", "user_id": user_id, "store_id": store_id, "book_id": book_id})
         except BaseException as e:
-            return 530, "{}".format(str(e))
+            return error.error_internal_exception(e, {"op": "add_book", "user_id": user_id, "store_id": store_id, "book_id": book_id})
         return 200, "ok"
     
     def add_stock_level(
@@ -91,9 +91,9 @@ class Seller(db_conn.DBConn):
             )
             
         except pymongo.errors.PyMongoError as e:
-            return 528, "{}".format(str(e))
+            return error.error_db_exception(e, {"op": "add_stock_level", "user_id": user_id, "store_id": store_id, "book_id": book_id})
         except BaseException as e:
-            return 530, "{}".format(str(e))
+            return error.error_internal_exception(e, {"op": "add_stock_level", "user_id": user_id, "store_id": store_id, "book_id": book_id})
         return 200, "ok"
 
     def create_store(self, user_id: str, store_id: str) -> (int, str):
@@ -109,7 +109,7 @@ class Seller(db_conn.DBConn):
             }
             self.db["Stores"].insert_one(store)
         except pymongo.errors.PyMongoError as e:
-            return 528, "{}".format(str(e))
+            return error.error_db_exception(e, {"op": "create_store", "user_id": user_id, "store_id": store_id})
         except BaseException as e:
-            return 530, "{}".format(str(e))
+            return error.error_internal_exception(e, {"op": "create_store", "user_id": user_id, "store_id": store_id})
         return 200, "ok"

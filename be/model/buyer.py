@@ -83,11 +83,11 @@ class Buyer(db_conn.DBConn):
             order_id = uid
             db["Orders"].insert_one(order)
         except pymongo.errors.PyMongoError as e:
-            logging.info("528, {}".format(str(e)))
-            return 528, "{}".format(str(e)), ""
+            code, msg = error.error_db_exception(e, {"op": "new_order", "user_id": user_id, "store_id": store_id})
+            return code, msg, ""
         except BaseException as e:
-            logging.info("530, {}".format(str(e)))
-            return 530, "{}".format(str(e)), ""
+            code, msg = error.error_internal_exception(e, {"op": "new_order", "user_id": user_id, "store_id": store_id})
+            return code, msg, ""
         
         return 200, "ok", order_id
     def payment(self, user_id: str, password: str, order_id: str) -> (int, str):
@@ -104,17 +104,17 @@ class Buyer(db_conn.DBConn):
 
             # 根据buyer_id获取balance,password，并鉴权
             if buyer_id != user_id:
-                return error.error_authorization_fail()
+                return error.error_authorization_fail({"op": "payment", "user_id": user_id, "order_id": order_id})
             user_doc = db["Users"].find_one({"_id": buyer_id})
             if user_doc is None:
                 return error.error_non_exist_user_id(buyer_id)
             balance = user_doc.get("balance", 0)
             if password != user_doc.get("password"):
-                return error.error_authorization_fail()
+                return error.error_authorization_fail({"op": "payment", "user_id": user_id, "order_id": order_id})
 
             # 防重复支付
             if order_doc.get("status") != "unpaid":
-                return error.error_invalid_order_id(order_id)
+                return error.error_invalid_order_status(order_id, order_doc.get("status"))
 
             if balance < total_amount:
                 return error.error_not_sufficient_funds(order_id)
@@ -150,12 +150,12 @@ class Buyer(db_conn.DBConn):
                 }, {
                     "$inc": {"balance": total_amount}
                 })
-                return error.error_invalid_order_id(order_id)
+                return error.error_invalid_order_status(order_id, order_doc.get("status"))
         except pymongo.errors.PyMongoError as e:
-            return 528, "{}".format(str(e))
+            return error.error_db_exception(e, {"op": "payment", "user_id": user_id, "order_id": order_id})
 
         except BaseException as e:
-            return 530, "{}".format(str(e))
+            return error.error_internal_exception(e, {"op": "payment", "user_id": user_id, "order_id": order_id})
 
         return 200, "ok"
     
@@ -167,16 +167,16 @@ class Buyer(db_conn.DBConn):
                 # sqlite这边是error.error_authorization_fail()，但我感觉是error_non_exist_user_id
                 return error.error_non_exist_user_id(user_id)
             if password != user_doc.get("password"):
-                return error.error_authorization_fail()
+                return error.error_authorization_fail({"op": "add_funds", "user_id": user_id})
             db["Users"].update_one({
                 "_id": user_id
             },{
                 "$inc":{"balance": add_value}
             })
         except pymongo.errors.PyMongoError as e:
-            return 528, "{}".format(str(e))
+            return error.error_db_exception(e, {"op": "add_funds", "user_id": user_id})
         except BaseException as e:
-            return 530, "{}".format(str(e))
+            return error.error_internal_exception(e, {"op": "add_funds", "user_id": user_id})
 
         return 200, "ok"
     
@@ -191,9 +191,9 @@ class Buyer(db_conn.DBConn):
                 return error.error_authorization_fail()
             return 200, "ok", order_doc
         except pymongo.errors.PyMongoError as e:
-            return 528, "{}".format(str(e))
+            return error.error_db_exception(e, {"op": "get_order", "user_id": user_id, "order_id": order_id})
         except BaseException as e:
-            return 530, "{}".format(str(e))
+            return error.error_internal_exception(e, {"op": "get_order", "user_id": user_id, "order_id": order_id})
     
     # 取消订单
     def cancel_order(self, user_id: str, order_id: str) -> (int, str):
@@ -205,13 +205,13 @@ class Buyer(db_conn.DBConn):
             if order_doc.get("buyer_id") != user_id:
                 return error.error_authorization_fail()
             if order_doc.get("status") != "unpaid":
-                return error.error_invalid_order_id(order_id)
+                return error.error_invalid_order_status(order_id, order_doc.get("status"))
             updated = db["Orders"].update_one(
                 {"_id": order_id, "status": "unpaid"},
                 {"$set": {"status": "cancelled", "cancel_time": time.time()}}
             )
             if updated.matched_count == 0:
-                return error.error_invalid_order_id(order_id)
+                return error.error_invalid_order_status(order_id, order_doc.get("status"))
             # 买家退款
             # 直接退款（不需要余额条件），若后续需要事务可加入 session
             db["Users"].update_one(
@@ -220,6 +220,6 @@ class Buyer(db_conn.DBConn):
             )
             return 200, "ok"
         except pymongo.errors.PyMongoError as e:
-            return 528, "{}".format(str(e))
+            return error.error_db_exception(e, {"op": "cancel_order", "user_id": user_id, "order_id": order_id})
         except BaseException as e:
-            return 530, "{}".format(str(e))
+            return error.error_internal_exception(e, {"op": "cancel_order", "user_id": user_id, "order_id": order_id})
