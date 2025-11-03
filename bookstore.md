@@ -64,14 +64,6 @@ Books
   "content": String,
   "tags": String, 
   "picture": BinData // 图片二进制数据
-  
-  // 全文搜索优化字段
-  "search_index": {
-    "title_lower": String, // 小写标题，便于搜索
-    "author_lower": String, // 小写作者
-    "tags_lower": [String], // 小写标签
-    "content_lower": String // 小写内容摘要
-  }
 }
 ```
 
@@ -86,13 +78,6 @@ Stores
       "book_id": String,
       "stock_level": Number,
       "price": Number, // 该店铺的销售价格
-	  "book_info":
-	  {
-		"title": String,
-		"tag":String,
-		"content": String
-		
-	  }
     }
   ]
   
@@ -131,3 +116,41 @@ Orders
   ],
 }
 ```
+
+## 索引
+### 索引与选择原因
+
+
+Users（无需额外索引）
+- 依赖 `_id` 默认主键即可；当前接口按用户ID读写。
+
+Books（全站关键字/参数化搜索）
+- 文本索引（集合仅允许一个 text 索引）：覆盖 `title/author/book_intro/content/tags` 并设权重。
+  - 原因：满足“题目、标签、目录/内容”的关键字搜索；权重让标题/作者更靠前。
+  - 示例：`db.Books.create_index([("title", "text"), ("author", "text"), ("book_intro", "text"), ("content", "text"), ("tags", "text")], name="books_text", default_language="none", weights={"title":10, "author":7, "tags":5, "book_intro":2, "content":2})`
+- 前缀/精确索引（高频两项）：
+  - `search_index.title_lower`：题目前缀/不区分大小写匹配（使用 `^` 前缀锚定）。
+  - `search_index.tags_lower`：标签精确或包含匹配。
+
+Stores（店铺范围搜索与库存操作）
+- `inventory.book_id`（多键索引）：
+  - 原因：店内库存按书目筛选与 `$elemMatch` 查询的高频场景；用于店铺范围限制（`_id in 店铺书目列表`）。
+
+Orders（订单查询与状态管理）
+- 复合索引：`(buyer_id, status, create_time)`。
+  - 原因：买家查询历史订单（按状态筛选、按创建时间分页）。取消订单按 `_id` 更新不依赖索引。
+- 状态超时扫描索引：`(status, timeout_at)`。
+  - 原因：高效扫描未支付且超时的订单以进行自动取消。
+
+
+### 查询策略与适配
+- 全站关键字（Books 文本索引）：
+  - 使用 `$text`，按 `textScore` 排序分页；覆盖题目、标签、目录/内容。
+- 全站参数化：
+  - 题目前缀：`{"search_index.title_lower": {"$regex": "^" + q}}`（锚定前缀）。
+  - 标签：`{"search_index.tags_lower": q}` 或 `$in` 多标签。
+- 店内搜索：
+  - 先取店铺的 `book_id` 列表（走 `inventory.book_id` 索引）。
+  - 在 Books 上 `$text` 或前缀/标签过滤，并限制 `_id in 店铺书目列表`。
+  - 优点：只需维护 Books 一个文本索引；避免 Stores 文本索引的多键复杂度与额外写入成本。
+
