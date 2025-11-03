@@ -25,16 +25,14 @@ class Buyer(db_conn.DBConn):
             items = []
             for book_id, count in id_and_count:
                 # 获取店铺库存并匹配该书
-                store_doc = db["Stores"].find_one({"_id": store_id})
-                if store_doc is None or "inventory" not in store_doc:
-                    return error.error_non_exist_store_id(store_id) + (order_id,)
-                inv_item = None
-                for it in store_doc.get("inventory", []):
-                    if it.get("book_id") == book_id:
-                        inv_item = it
-                        break
-                if inv_item is None:
+                # 使用 $elemMatch + 投影仅返回匹配的库存项
+                store_doc = db["Stores"].find_one(
+                    {"_id": store_id, "inventory": {"$elemMatch": {"book_id": book_id}}},
+                    {"inventory.$": 1}
+                )
+                if store_doc is None or "inventory" not in store_doc or not store_doc["inventory"]:
                     return error.error_non_exist_book_id(book_id) + (order_id,)
+                inv_item = store_doc["inventory"][0]
                 store_level = inv_item.get("stock_level", 0)
                 price = inv_item.get("price", 0)
                 book_info = inv_item.get("book_info")
@@ -99,7 +97,7 @@ class Buyer(db_conn.DBConn):
             if balance < total_amount:
                 return error.error_not_sufficient_funds(order_id)
 
-            # 买家扣款
+            # 买家扣款（一次且带余额条件，防止并发超扣）
             res = db["Users"].update_one(
                 {"_id": buyer_id, "balance": {"$gte": total_amount}},
                 {"$inc": {"balance": -total_amount}}
@@ -116,14 +114,7 @@ class Buyer(db_conn.DBConn):
             统一一下业务流程：
             下单 买家扣款，发货 book的stock_level减少，收货 卖家收款
             '''
-            # 买家扣款
-            self.conn["bookstore"][Users].update_one({
-                "_id": buyer_id
-            }, {
-                "$inc": {
-                    "balance": -total_amount
-                }
-            })
+            # 删除重复扣款（已在上方完成一次扣款）
             # 更新订单状态
             # sqlite的逻辑是直接删除订单，这里使用status记录订单状态
             updated = db["Orders"].update_one(
@@ -193,27 +184,18 @@ class Buyer(db_conn.DBConn):
                 return error.error_authorization_fail()
             if order_doc.get("status") != "unpaid":
                 return error.error_invalid_order_id(order_id)
-            db["Orders"].update_one({
-                "_id": order_id
-            },{
-                "$set":{"status":"canceled"}
-            })
+            updated = db["Orders"].update_one(
+                {"_id": order_id, "status": "unpaid"},
+                {"$set": {"status": "cancelled", "cancel_time": time.time()}}
+            )
+            if updated.matched_count == 0:
+                return error.error_invalid_order_id(order_id)
             # 买家退款
-            res = db["Users"].update_one(
-                {
-                    "_id": user_id, 
-                    "balance": {"$gte": order_doc.get("total_amount", 0)}
-                },{
-                    "$inc": {"balance": order_doc.get("total_amount", 0)}
-                })
-            if res.matched_count == 0:
-                # 状态更新失败则回滚取消订单
-                db["Orders"].update_one({
-                    "_id": order_id
-                },{
-                    "$set":{"status":"unpaid"}
-                })
-                return error.error_not_sufficient_funds(order_id)
+            # 直接退款（不需要余额条件），若后续需要事务可加入 session
+            db["Users"].update_one(
+                {"_id": user_id},
+                {"$inc": {"balance": order_doc.get("total_amount", 0)}}
+            )
             return 200, "ok"
         except pymongo.errors.PyMongoError as e:
             return 528, "{}".format(str(e))
