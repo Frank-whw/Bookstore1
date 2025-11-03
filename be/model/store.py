@@ -15,9 +15,9 @@ class StoreMongoDB:
     - 集合：Users, Stores, Orders, Books
     - 索引：
         * Users.token (sparse)
-        * Stores.user_id
-        * Orders.buyer_id, Orders.store_id, Orders.status
-        * Books.search_index.title_lower / author_lower / tags_lower
+        * Stores.user_id, Stores.inventory.book_id
+        * Orders (buyer_id, status, create_time) 复合索引；(status, timeout_at)
+        * Books 文本索引 + 前缀索引（title_lower、tags_lower）
     """
 
     def __init__(self, mongo_uri: str = "mongodb://localhost:27017/", db_name: str = "bookstore"):
@@ -50,21 +50,42 @@ class StoreMongoDB:
             # Stores 索引
             try:
                 self.db.Stores.create_index([("user_id", ASCENDING)])
+                # 为按商品过滤库存添加多键索引
+                self.db.Stores.create_index([("inventory.book_id", ASCENDING)])
             except PyMongoError as e:
                 logging.warning(f"Stores.create_index(user_id) 失败: {e}")
 
             # Orders 索引
             try:
-                self.db.Orders.create_index([("buyer_id", ASCENDING)])
-                self.db.Orders.create_index([("store_id", ASCENDING)])
-                self.db.Orders.create_index([("status", ASCENDING)])
+                # 复合索引：buyer_id + status + create_time（按时间倒序）
+                self.db.Orders.create_index([("buyer_id", ASCENDING), ("status", ASCENDING), ("create_time", -1)], name="orders_by_buyer_status_time")
+                # 可选索引：状态超时扫描
+                self.db.Orders.create_index([("status", ASCENDING), ("timeout_at", ASCENDING)], name="orders_timeout_scan")
             except PyMongoError as e:
                 logging.warning(f"Orders.create_index 失败: {e}")
 
             # Books 索引（用于搜索优化）
             try:
+                # 单一文本索引，覆盖多个字段并设置权重
+                try:
+                    self.db.Books.create_index([
+                        ("title", "text"),
+                        ("author", "text"),
+                        ("book_intro", "text"),
+                        ("content", "text"),
+                        ("tags", "text"),
+                    ], name="books_text", default_language="none", weights={
+                        "title": 10,
+                        "author": 7,
+                        "tags": 5,
+                        "book_intro": 2,
+                        "content": 2,
+                    })
+                except Exception:
+                    # 如果已有文本索引则忽略
+                    pass
+                # 前缀索引（题目与标签）
                 self.db.Books.create_index([("search_index.title_lower", ASCENDING)])
-                self.db.Books.create_index([("search_index.author_lower", ASCENDING)])
                 self.db.Books.create_index([("search_index.tags_lower", ASCENDING)])
             except PyMongoError as e:
                 logging.warning(f"Books.create_index(search_index.*) 失败: {e}")

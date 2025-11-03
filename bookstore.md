@@ -20,9 +20,9 @@
   - [ ] 添加订单管理功能
 - [x] 修改[user.py](be/model/user.py) - 用户认证逻辑
   - [x] 适配MongoDB的用户数据操作
-- [ ] 修改[store.py](be/model/store.py) - 数据库初始化
-  - [ ] 替换SQLite表创建为MongoDB集合初始化
-  - [ ] 创建必要的索引
+- [x] 修改[store.py](be/model/store.py) - 数据库初始化
+  - [x] 替换SQLite表创建为MongoDB集合初始化
+  - [x] 创建必要的索引
 - [ ] 实现新功能
   - [ ] 图书搜索功能（全文索引）
   - [ ] 订单超时自动取消

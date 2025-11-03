@@ -21,7 +21,7 @@ import json
 import logging
 import os
 import sqlite3
-import datetime
+import time
 from typing import Dict, List, Optional, Tuple
 
 try:
@@ -183,11 +183,6 @@ def migrate_stores(be_conn: sqlite3.Connection, mongo_db, dry_run: bool) -> int:
             "book_id": r["book_id"],
             "stock_level": int(r["stock_level"]) if r["stock_level"] is not None else 0,
             "price": info.get("price"),
-            "book_info": {
-                "title": info.get("title"),
-                "tag": first_tag(info.get("tags")),
-                "content": info.get("content") or info.get("book_intro") or info.get("author_intro"),
-            },
         }
         inventory.append(item)
 
@@ -261,7 +256,8 @@ def migrate_orders(be_conn: sqlite3.Connection, mongo_db, dry_run: bool) -> int:
             "items": items,
             "total_amount": total_amount,
             "status": "unpaid",
-            "create_time": datetime.datetime.utcnow(),
+            # 与后端保持一致：使用 time.time()（秒）
+            "create_time": time.time(),
             "pay_time": None,
             "ship_time": None,
             "deliver_time": None,
@@ -331,9 +327,7 @@ def migrate_books(book_conn: Optional[sqlite3.Connection], mongo_db, dry_run: bo
             "picture": r["picture"],
             "search_index": {
                 "title_lower": to_lower(r["title"]),
-                "author_lower": to_lower(r["author"]),
                 "tags_lower": tags_lower(r["tags"]),
-                "content_lower": to_lower(r["content"]) or to_lower(r["book_intro"]),
             },
         }
         mongo_db.Books.update_one({"_id": doc["_id"]}, {"$set": doc}, upsert=True)
@@ -346,11 +340,29 @@ def create_indexes(mongo_db):
     try:
         mongo_db.Users.create_index([("token", ASCENDING)], sparse=True)
         mongo_db.Stores.create_index([("user_id", ASCENDING)])
-        mongo_db.Orders.create_index([("buyer_id", ASCENDING)])
-        mongo_db.Orders.create_index([("store_id", ASCENDING)])
-        mongo_db.Orders.create_index([("status", ASCENDING)])
+        mongo_db.Stores.create_index([("inventory.book_id", ASCENDING)])
+        # Orders 复合索引 + 超时索引
+        mongo_db.Orders.create_index([("buyer_id", ASCENDING), ("status", ASCENDING), ("create_time", -1)], name="orders_by_buyer_status_time")
+        mongo_db.Orders.create_index([("status", ASCENDING), ("timeout_at", ASCENDING)], name="orders_timeout_scan")
+        # Books 文本索引（集合只能有一个 text 索引）
+        try:
+            mongo_db.Books.create_index([
+                ("title", "text"),
+                ("author", "text"),
+                ("book_intro", "text"),
+                ("content", "text"),
+                ("tags", "text"),
+            ], name="books_text", default_language="none", weights={
+                "title": 10,
+                "author": 7,
+                "tags": 5,
+                "book_intro": 2,
+                "content": 2,
+            })
+        except Exception:
+            pass
+        # 前缀索引：title/tags
         mongo_db.Books.create_index([("search_index.title_lower", ASCENDING)])
-        mongo_db.Books.create_index([("search_index.author_lower", ASCENDING)])
         mongo_db.Books.create_index([("search_index.tags_lower", ASCENDING)])
         logging.info("indexes created/verified")
     except PyMongoError as e:

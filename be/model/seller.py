@@ -17,7 +17,7 @@ class Seller(db_conn.DBConn):
             if not self.store_id_exist(store_id):
                 return error.error_non_exist_store_id(store_id)
             # 如果店铺库存中已存在该书，返回 exist_book_id
-            exists = self.conn["bookstore"]["Stores"].find_one({
+            exists = self.db["Stores"].find_one({
                 "_id": store_id,
                 "inventory": {"$elemMatch": {"book_id": book_id}}
             })
@@ -54,13 +54,8 @@ class Seller(db_conn.DBConn):
                 "book_id": book_id,
                 "stock_level": stock_level,
                 "price": info.get("price"),
-                "book_info": {
-                    "title": info.get("title"),
-                    "tag": info.get("tags"),
-                    "content": info.get("content")
-                }
             }
-            self.conn["bookstore"]["Stores"].update_one(
+            self.db["Stores"].update_one(
                 {"_id": store_id},
                 {"$push": {"inventory": book}}
             )
@@ -83,14 +78,14 @@ class Seller(db_conn.DBConn):
             except Exception:
                 add_stock_level = 0
             # 检查店铺库存中是否存在该书：通过 $elemMatch 查询
-            store_doc = self.conn["bookstore"]["Stores"].find_one({
+            store_doc = self.db["Stores"].find_one({
                 "_id": store_id,
                 "inventory": {"$elemMatch": {"book_id": book_id}}
             })
             if store_doc is None:
                 return error.error_non_exist_book_id(book_id)
             # 使用位置操作符 $ 更新匹配的数组元素
-            self.conn["bookstore"]["Stores"].update_one(
+            self.db["Stores"].update_one(
                 {"_id": store_id, "inventory.book_id": book_id},
                 {"$inc": {"inventory.$.stock_level": add_stock_level}}
             )
@@ -112,7 +107,7 @@ class Seller(db_conn.DBConn):
                 "user_id": user_id,
                 "inventory":[]
             }
-            self.conn["bookstore"]["Stores"].insert_one(store)
+            self.db["Stores"].insert_one(store)
         except pymongo.errors.PyMongoError as e:
             return 528, "{}".format(str(e))
         except BaseException as e:
