@@ -19,7 +19,7 @@ class Buyer(db_conn.DBConn):
             if not self.store_id_exist(store_id):
                 return error.error_non_exist_store_id(store_id) + (order_id,)
             uid = "{}_{}_{}".format(user_id, store_id, str(uuid.uuid1()))
-            db = self.conn["bookstore"]
+            db = self.db
 
             total_amount = 0
             items = []
@@ -34,8 +34,30 @@ class Buyer(db_conn.DBConn):
                     return error.error_non_exist_book_id(book_id) + (order_id,)
                 inv_item = store_doc["inventory"][0]
                 store_level = inv_item.get("stock_level", 0)
-                price = inv_item.get("price", 0)
-                book_info = inv_item.get("book_info")
+                # 归一化价格为 0（防止 None 导致计算异常）
+                price = inv_item.get("price", 0) or 0
+                # 从 Books 获取快照信息
+                book_doc = db["Books"].find_one(
+                    {"_id": book_id},
+                    {"title": 1, "tags": 1, "content": 1}
+                )
+                # 生成 tag（取第一个标签）
+                tag_val = None
+                tags = book_doc.get("tags") if book_doc else None
+                if isinstance(tags, list):
+                    tag_val = tags[0] if tags else None
+                elif isinstance(tags, str):
+                    parts = [t.strip() for t in tags.replace("\n", ",").split(",") if t.strip()]
+                    tag_val = parts[0] if parts else None
+                # 生成 content
+                content_val = None
+                if book_doc:
+                    content_val = book_doc.get("content")
+                book_info = {
+                    "title": book_doc.get("title") if book_doc else None,
+                    "tag": tag_val,
+                    "content": content_val,
+                }
                 if store_level < count:
                     return error.error_stock_level_low(book_id) + (order_id,)
                 # sqlite代码逻辑是这边直接更新库存，但是后面要涉及发货
@@ -70,7 +92,7 @@ class Buyer(db_conn.DBConn):
         return 200, "ok", order_id
     def payment(self, user_id: str, password: str, order_id: str) -> (int, str):
         try:
-            db = self.conn["bookstore"]
+            db = self.db
             # 根据order_id获取订单信息
             if not self.order_id_exist(order_id):
                 return error.error_invalid_order_id(order_id)
@@ -139,7 +161,7 @@ class Buyer(db_conn.DBConn):
     
     def add_funds(self, user_id, password, add_value) -> (int, str):
         try:
-            db = self.conn["bookstore"]
+            db = self.db
             user_doc = db["Users"].find_one({"_id": user_id})
             if user_doc is None:
                 # sqlite这边是error.error_authorization_fail()，但我感觉是error_non_exist_user_id
@@ -161,7 +183,7 @@ class Buyer(db_conn.DBConn):
     # 订单查询
     def get_order(self, user_id: str, order_id: str) -> (int, str, dict):
         try:
-            db = self.conn["bookstore"]
+            db = self.db
             order_doc = db["Orders"].find_one({"_id": order_id})
             if order_doc is None:
                 return error.error_invalid_order_id(order_id)
