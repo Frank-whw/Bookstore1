@@ -63,13 +63,13 @@ class User(db_conn.DBConn):
                 "token": token,
                 "terminal": terminal
             }
-            self.conn[bookstore][Users].insert_one(user)
+            self.conn["bookstore"]["Users"].insert_one(user)
         except pymongo.errors.PyMongoError as e:
             return 528, "{}".format(str(e))
         return 200, "ok"
     
     def check_token(self, user_id: str, token: str) -> (int, str):
-        user_doc = self.conn[bookstore][Users].find_one({"_id": user_id})
+        user_doc = self.conn["bookstore"]["Users"].find_one({"_id": user_id})
         if user_doc is None:
             return error.error_non_exist_user_id(user_id)
         db_token = user_doc.get("token")
@@ -78,7 +78,7 @@ class User(db_conn.DBConn):
         return 200, "ok"
     
     def check_password(self, user_id: str, password: str) -> (int, str):
-        user_doc = self.conn[bookstore][Users].find_one({"_id": user_id})
+        user_doc = self.conn["bookstore"]["Users"].find_one({"_id": user_id})
         if user_doc is None:
             return error.error_non_exist_user_id(user_id)
         db_password = user_doc.get("password")
@@ -94,7 +94,7 @@ class User(db_conn.DBConn):
                 return code, message, ""
 
             token = jwt_encode(user_id, terminal)
-            self.conn[bookstore][Users].update_one({
+            self.conn["bookstore"]["Users"].update_one({
                 "_id": user_id
             },{
                 "$set":{"token": token}
@@ -114,7 +114,7 @@ class User(db_conn.DBConn):
             terminal = "terminal_{}".format(str(time.time()))
             dummy_token = jwt_encode(user_id, terminal)
 
-            self.conn[bookstore][Users].update_one({
+            self.conn["bookstore"]["Users"].update_one({
                 "_id": user_id
             },{
                 "$set":{
@@ -134,7 +134,7 @@ class User(db_conn.DBConn):
             if code != 200:
                 return code, message
 
-            self.conn[bookstore][Users].delete_one({
+            self.conn["bookstore"]["Users"].delete_one({
                 "_id": user_id
             })
         except pymongo.errors.PyMongoError as e:
@@ -153,7 +153,7 @@ class User(db_conn.DBConn):
 
             terminal = "terminal_{}".format(str(time.time()))
             token = jwt_encode(user_id, terminal)
-            self.conn[bookstore][Users].update_one({
+            self.conn["bookstore"]["Users"].update_one({
                 "_id": user_id
             },{
                 "$set":{
