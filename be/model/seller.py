@@ -1,6 +1,8 @@
+import json
 import pymongo
 
 from be.model import db_conn
+from be.model import error
 
 class Seller(db_conn.DBConn):
     def __init__(self):
@@ -14,9 +16,19 @@ class Seller(db_conn.DBConn):
                 return error.error_non_exist_user_id(user_id)
             if not self.store_id_exist(store_id):
                 return error.error_non_exist_store_id(store_id)
-            if self.book_id_exist(store_id, book_id):
+            # 如果店铺库存中已存在该书，返回 exist_book_id
+            exists = self.conn["bookstore"]["Stores"].find_one({
+                "_id": store_id,
+                "inventory": {"$elemMatch": {"book_id": book_id}}
+            })
+            if exists is not None:
                 return error.error_exist_book_id(book_id)
             info = json.loads(book_json_str)
+            # 参数类型归一化
+            try:
+                stock_level = int(stock_level)
+            except Exception:
+                stock_level = 0
             '''
             {
             "id": "1000134",
@@ -48,13 +60,10 @@ class Seller(db_conn.DBConn):
                     "content": info.get("content")
                 }
             }
-            self.conn["bookstore"]["Stores"].update_one({
-                "_id": store_id
-            },{
-                "$push":{
-                    "inventory": {book}
-                }
-            })
+            self.conn["bookstore"]["Stores"].update_one(
+                {"_id": store_id},
+                {"$push": {"inventory": book}}
+            )
         except pymongo.errors.PyMongoError as e:
             return 528, "{}".format(str(e))
         except BaseException as e:
@@ -69,15 +78,22 @@ class Seller(db_conn.DBConn):
                 return error.error_non_exist_user_id(user_id)
             if not self.store_id_exist(store_id):
                 return error.error_non_exist_store_id(store_id)
-            if not self.book_id_exist(store_id, book_id):
-                return error.error_non_exist_book_id(book_id)
-
-            self.conn["bookstore"]["Stores"].update_one({
+            try:
+                add_stock_level = int(add_stock_level)
+            except Exception:
+                add_stock_level = 0
+            # 检查店铺库存中是否存在该书：通过 $elemMatch 查询
+            store_doc = self.conn["bookstore"]["Stores"].find_one({
                 "_id": store_id,
-                "inventory.book_id": book_id
-            },{
-                "$inc":{"inventory.stock_level": add_stock_level}
+                "inventory": {"$elemMatch": {"book_id": book_id}}
             })
+            if store_doc is None:
+                return error.error_non_exist_book_id(book_id)
+            # 使用位置操作符 $ 更新匹配的数组元素
+            self.conn["bookstore"]["Stores"].update_one(
+                {"_id": store_id, "inventory.book_id": book_id},
+                {"$inc": {"inventory.$.stock_level": add_stock_level}}
+            )
             
         except pymongo.errors.PyMongoError as e:
             return 528, "{}".format(str(e))
