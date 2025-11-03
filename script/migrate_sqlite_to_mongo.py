@@ -37,8 +37,8 @@ logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Migrate SQLite data to MongoDB")
-    parser.add_argument("--be-db", default=os.path.join("be", "be.db"), help="Path to be.db")
-    parser.add_argument("--book-db", default=os.path.join("fe", "data", "book.db"), help="Path to book.db (optional)")
+    parser.add_argument("--be-db", default=os.path.join("be.db"), help="Path to be.db")
+    parser.add_argument("--book-db", default=os.path.join("fe", "data", "book_lx.db"), help="Path to book.db (optional)")
     parser.add_argument("--mongo-uri", default="mongodb://localhost:27017", help="MongoDB connection URI")
     parser.add_argument("--mongo-db", default="bookstore", help="MongoDB database name")
     parser.add_argument("--batch-size", type=int, default=1000, help="Bulk write batch size")
