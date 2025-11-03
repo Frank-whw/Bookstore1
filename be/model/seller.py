@@ -119,3 +119,46 @@ class Seller(db_conn.DBConn):
             code, msg, _ = error.exception_to_tuple3(e)
             return code, msg
         return 200, "ok"
+
+    def ship_order(self, user_id: str, order_id: str) -> (int, str):
+
+        try:
+            if not self.user_id_exist(user_id):
+                return error.error_non_exist_user_id(user_id)
+                
+            if not self.order_id_exist(order_id):
+                return error.error_invalid_order_id(order_id)
+                
+            order_doc = self.db["Orders"].find_one({"_id": order_id})
+            
+            store_doc = self.db["Stores"].find_one({
+                "_id": order_doc["store_id"], 
+                "user_id": user_id
+            })
+            if store_doc is None:
+                return error.error_authorization_fail()
+            
+            if order_doc.get("status") != "paid":
+                return error.error_order_status_mismatch(order_id)
+            
+            result = self.db["Orders"].update_one(
+                {"_id": order_id, "status": "paid"},
+                {
+                    "$set": {
+                        "status": "shipped",
+                        "ship_time": time.time()
+                    }
+                }
+            )
+            
+            if result.modified_count == 0:
+                return error.error_order_status_mismatch(order_id)
+                
+        except pymongo.errors.PyMongoError as e:
+            code, msg, _ = error.exception_db_to_tuple3(e)
+            return code, msg
+        except BaseException as e:
+            code, msg, _ = error.exception_to_tuple3(e)
+            return code, msg
+        
+        return 200, "ok"
