@@ -65,13 +65,15 @@ class User(db_conn.DBConn):
             }
             self.db["Users"].insert_one(user)
         except pymongo.errors.PyMongoError as e:
-            return error.error_db_exception(e, {"op": "register", "user_id": user_id})
+            code, msg, _ = error.exception_db_to_tuple3(e)
+            return code, msg
         return 200, "ok"
     
     def check_token(self, user_id: str, token: str) -> (int, str):
         user_doc = self.db["Users"].find_one({"_id": user_id})
         if user_doc is None:
-            return error.error_non_exist_user_id(user_id)
+            # 认证相关场景统一返回 401
+            return error.error_authorization_fail()
         db_token = user_doc.get("token")
         if not self.__check_token__(user_id, db_token, token):
             return error.error_authorization_fail()
@@ -80,7 +82,8 @@ class User(db_conn.DBConn):
     def check_password(self, user_id: str, password: str) -> (int, str):
         user_doc = self.db["Users"].find_one({"_id": user_id})
         if user_doc is None:
-            return error.error_non_exist_user_id(user_id)
+            # 认证相关场景统一返回 401
+            return error.error_authorization_fail()
         db_password = user_doc.get("password")
         if db_password != password:
             return error.error_authorization_fail()
@@ -100,10 +103,10 @@ class User(db_conn.DBConn):
                 "$set":{"token": token}
             })
         except pymongo.errors.PyMongoError as e:
-            code, msg = error.error_db_exception(e, {"op": "login", "user_id": user_id})
+            code, msg, _ = error.exception_db_to_tuple3(e)
             return code, msg, ""
         except BaseException as e:
-            code, msg = error.error_internal_exception(e, {"op": "login", "user_id": user_id})
+            code, msg, _ = error.exception_to_tuple3(e)
             return code, msg, ""
         return 200, "ok", token
 
@@ -125,9 +128,11 @@ class User(db_conn.DBConn):
                 }
             })
         except pymongo.errors.PyMongoError as e:
-            return error.error_db_exception(e, {"op": "logout", "user_id": user_id})
+            code, msg, _ = error.exception_db_to_tuple3(e)
+            return code, msg
         except BaseException as e:
-            return error.error_internal_exception(e, {"op": "logout", "user_id": user_id})
+            code, msg, _ = error.exception_to_tuple3(e)
+            return code, msg
         return 200, "ok"
 
     def unregister(self, user_id: str, password: str) -> (int, str):
@@ -140,9 +145,11 @@ class User(db_conn.DBConn):
                 "_id": user_id
             })
         except pymongo.errors.PyMongoError as e:
-            return error.error_db_exception(e, {"op": "unregister", "user_id": user_id})
+            code, msg, _ = error.exception_db_to_tuple3(e)
+            return code, msg
         except BaseException as e:
-            return error.error_internal_exception(e, {"op": "unregister", "user_id": user_id})
+            code, msg, _ = error.exception_to_tuple3(e)
+            return code, msg
         return 200, "ok"
 
     def change_password(
@@ -165,7 +172,9 @@ class User(db_conn.DBConn):
                 }
             })
         except pymongo.errors.PyMongoError as e:
-            return error.error_db_exception(e, {"op": "change_password", "user_id": user_id})
+            code, msg, _ = error.exception_db_to_tuple3(e)
+            return code, msg
         except BaseException as e:
-            return error.error_internal_exception(e, {"op": "change_password", "user_id": user_id})
+            code, msg, _ = error.exception_to_tuple3(e)
+            return code, msg
         return 200, "ok"
