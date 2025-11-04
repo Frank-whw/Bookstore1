@@ -51,15 +51,6 @@ def receive_order():
     code, message = b.receive_order(user_id, order_id)
     return jsonify({"message": message}), code
 
-
-@bp_buyer.route("/order_status", methods=["POST"])
-def query_order_status():
-    user_id: str = request.json.get("user_id")
-    order_id: str = request.json.get("order_id")
-    
-    b = Buyer()
-    code, message, order_info = b.query_order_status(user_id, order_id)
-    return jsonify({"message": message, "order": order_info}), code
 @bp_buyer.route("/orders", methods=["POST"])
 def query_orders():
     user_id: str = request.json.get("user_id")

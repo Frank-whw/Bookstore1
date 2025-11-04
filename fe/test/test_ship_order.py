@@ -6,6 +6,7 @@ from fe.access.new_buyer import register_new_buyer
 from fe.access.new_seller import register_new_seller
 from fe.access.seller import Seller
 from fe.access.book import Book
+from be.model.store import get_db
 import uuid
 
 
@@ -82,17 +83,62 @@ class TestShipOrder:
         assert code != 200
 
     def test_stock_level_decrease(self):
-        # 记录发货前的库存信息
-        initial_stocks = {}
-        for item in self.buy_book_info_list:
+        # 独立测试数据
+        test_seller_id = "test_stock_seller_{}".format(str(uuid.uuid1()))
+        test_store_id = "test_stock_store_{}".format(str(uuid.uuid1()))
+        test_buyer_id = "test_stock_buyer_{}".format(str(uuid.uuid1()))
+        
+        gen_book = GenBook(test_seller_id, test_store_id)
+        ok, buy_book_id_list = gen_book.gen(non_exist_book_id=False, low_stock_level=False, max_book_count=1)
+        assert ok
+        
+        test_buyer = register_new_buyer(test_buyer_id, test_seller_id)
+        code, test_order_id = test_buyer.new_order(test_store_id, buy_book_id_list)
+        assert code == 200
+        
+        # 支付
+        total_price = 0
+        for item in gen_book.buy_book_info_list:
             book: Book = item[0]
-            initial_stocks[book.id] = item[1]
+            num = item[1]
+            if book.price is not None:
+                total_price += book.price * num
+        
+        code = test_buyer.add_funds(total_price)
+        assert code == 200
+        code = test_buyer.payment(test_order_id)
+        assert code == 200
+        
+        # 记录发货前的库存
+        db = get_db()
+        order_doc = db["Orders"].find_one({"_id": test_order_id})
+        items = order_doc.get("items", [])
+        
+        initial_stocks = {}
+        for item in items:
+            book_id = item["book_id"]
+            quantity = item["quantity"]
+            
+            store_doc = db["Stores"].find_one(
+                {"_id": test_store_id, "inventory": {"$elemMatch": {"book_id": book_id}}},
+                {"inventory.$": 1}
+            )
+            if store_doc and "inventory" in store_doc and store_doc["inventory"]:
+                initial_stock = store_doc["inventory"][0].get("stock_level", 0)
+                initial_stocks[book_id] = {"initial": initial_stock, "quantity": quantity}
         
         # 发货
-        code = self.seller.ship_order(self.order_id)
+        test_seller = Seller(conf.URL, test_seller_id, test_seller_id)
+        code = test_seller.ship_order(test_order_id)
         assert code == 200
         
-        # 验证订单状态变为已发货
-        code, order_info = self.buyer.query_order_status(self.order_id)
-        assert code == 200
-        assert order_info.get("status") == "shipped"
+        # 验证库存减少
+        for book_id, stock_info in initial_stocks.items():
+            store_doc = db["Stores"].find_one(
+                {"_id": test_store_id, "inventory": {"$elemMatch": {"book_id": book_id}}},
+                {"inventory.$": 1}
+            )
+            assert store_doc is not None
+            current_stock = store_doc["inventory"][0].get("stock_level", 0)
+            expected_stock = stock_info["initial"] - stock_info["quantity"]
+            assert current_stock == expected_stock

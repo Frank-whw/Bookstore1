@@ -59,16 +59,6 @@ class Buyer:
         r = requests.post(url, headers=headers, json=json)
         return r.status_code
 
-    def query_order_status(self, order_id: str) -> (int, dict):
-        json = {
-            "user_id": self.user_id,
-            "order_id": order_id,
-        }
-        url = urljoin(self.url_prefix, "order_status")
-        headers = {"token": self.token}
-        r = requests.post(url, headers=headers, json=json)
-        response_json = r.json()
-        return r.status_code, response_json.get("order", {})
 
     def query_orders(self, status: str = None, page: int = 1) -> (int, dict):
         json = {
