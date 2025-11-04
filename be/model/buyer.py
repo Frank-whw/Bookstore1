@@ -185,6 +185,60 @@ class Buyer(db_conn.DBConn):
             return code, msg
 
         return 200, "ok"
+
+    def receive_order(self, user_id: str, order_id: str) -> (int, str):
+        try:
+            if not self.user_id_exist(user_id):
+                return error.error_non_exist_user_id(user_id)
+        
+            if not self.order_id_exist(order_id):
+                return error.error_invalid_order_id(order_id)
+            
+            order_doc = self.db["Orders"].find_one({
+                "_id": order_id,
+                "buyer_id": user_id
+            })
+            if order_doc is None:
+                return error.error_authorization_fail()
+            
+            if order_doc.get("status") != "shipped":
+                return error.error_order_status_mismatch(order_id)
+            
+            # 更新订单状态为已收货，同时给卖家转账
+            total_amount = order_doc.get("total_amount", 0)
+            store_id = order_doc.get("store_id")
+            
+            store_doc = self.db["Stores"].find_one({"_id": store_id})
+            if store_doc is None:
+                return error.error_non_exist_store_id(store_id)
+            seller_id = store_doc.get("user_id")
+
+            result = self.db["Orders"].update_one(
+                {"_id": order_id, "status": "shipped"},
+                {
+                    "$set": {
+                        "status": "delivered", 
+                        "deliver_time": time.time()
+                    }
+                }
+            )
+            
+            if result.modified_count == 0:
+                return error.error_order_status_mismatch(order_id)
+
+            self.db["Users"].update_one(
+                {"_id": seller_id},
+                {"$inc": {"balance": total_amount}}
+            )
+                
+        except pymongo.errors.PyMongoError as e:
+            code, msg, _ = error.exception_db_to_tuple3(e)
+            return code, msg
+        except BaseException as e:
+            code, msg, _ = error.exception_to_tuple3(e)
+            return code, msg
+        
+        return 200, "ok"
     
     # 订单查询
     def get_order(self, user_id: str, order_id: str) -> (int, str, dict):
@@ -238,3 +292,51 @@ class Buyer(db_conn.DBConn):
         except BaseException as e:
             code, msg, _ = error.exception_to_tuple3(e)
             return code, msg
+
+    def query_order_status(self, user_id: str, order_id: str) -> (int, str, dict):
+        """
+        查询订单状态
+        :param user_id: 买家用户ID
+        :param order_id: 订单ID  
+        :return: (状态码, 消息, 订单信息)
+        """
+        try:
+            # 参数验证
+            if user_id is None or order_id is None:
+                return 400, "参数不能为空", {}
+                
+            if not self.user_id_exist(user_id):
+                return error.error_non_exist_user_id(user_id) + ({},)
+                
+            if not self.order_id_exist(order_id):
+                return error.error_invalid_order_id(order_id) + ({},)
+            
+            # 获取订单信息并检查权限
+            order_doc = self.db["Orders"].find_one({
+                "_id": order_id,
+                "buyer_id": user_id
+            })
+            if order_doc is None:
+                return error.error_authorization_fail() + ({},)
+            
+            # 构造返回的订单信息
+            order_info = {
+                "order_id": order_doc["_id"],
+                "store_id": order_doc["store_id"],
+                "status": order_doc["status"],
+                "total_amount": order_doc["total_amount"],
+                "create_time": order_doc.get("create_time"),
+                "pay_time": order_doc.get("pay_time"),
+                "ship_time": order_doc.get("ship_time"),
+                "deliver_time": order_doc.get("deliver_time"),
+                "items": order_doc.get("items", [])
+            }
+            
+        except pymongo.errors.PyMongoError as e:
+            code, msg, _ = error.exception_db_to_tuple3(e)
+            return code, msg, {}
+        except BaseException as e:
+            code, msg, _ = error.exception_to_tuple3(e)
+            return code, msg, {}
+        
+        return 200, "ok", order_info
