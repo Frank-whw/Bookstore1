@@ -292,44 +292,65 @@ class Buyer(db_conn.DBConn):
         except BaseException as e:
             code, msg, _ = error.exception_to_tuple3(e)
             return code, msg
-
-    def query_order_status(self, user_id: str, order_id: str) -> (int, str, dict):
-        """
-        查询订单状态
-        :param user_id: 买家用户ID
-        :param order_id: 订单ID  
-        :return: (状态码, 消息, 订单信息)
-        """
+    def query_orders(self, user_id: str, status: str = None, page: int = 1) -> (int, str, dict):
         try:
-            # 参数验证
-            if user_id is None or order_id is None:
-                return 400, "参数不能为空", {}
+            if user_id is None:
+                return error.error_and_message(400, "参数不能为空") + ({},)
                 
             if not self.user_id_exist(user_id):
                 return error.error_non_exist_user_id(user_id) + ({},)
-                
-            if not self.order_id_exist(order_id):
-                return error.error_invalid_order_id(order_id) + ({},)
+
+            page_size = 10
+            try:
+                page = max(1, int(page)) if page else 1
+            except (ValueError, TypeError):
+                return error.error_and_message(400, "页码参数无效") + ({},)
+            skip = (page - 1) * page_size
             
-            # 获取订单信息并检查权限
-            order_doc = self.db["Orders"].find_one({
-                "_id": order_id,
-                "buyer_id": user_id
-            })
-            if order_doc is None:
-                return error.error_authorization_fail() + ({},)
+            # 利用复合索引 (buyer_id, status, create_time)
+            query = {"buyer_id": user_id}
+            if status and status.strip():
+                query["status"] = status.strip()
             
-            # 构造返回的订单信息
-            order_info = {
-                "order_id": order_doc["_id"],
-                "store_id": order_doc["store_id"],
-                "status": order_doc["status"],
-                "total_amount": order_doc["total_amount"],
-                "create_time": order_doc.get("create_time"),
-                "pay_time": order_doc.get("pay_time"),
-                "ship_time": order_doc.get("ship_time"),
-                "deliver_time": order_doc.get("deliver_time"),
-                "items": order_doc.get("items", [])
+            total_count = self.db["Orders"].count_documents(query)
+            
+            # 查询订单列表，按创建时间倒序
+            orders_cursor = self.db["Orders"].find(
+                query,
+                {
+                    "_id": 1, "store_id": 1, "status": 1, "total_amount": 1,
+                    "create_time": 1, "pay_time": 1, "ship_time": 1, "deliver_time": 1,
+                    "items": 1
+                }
+            ).sort("create_time", -1).skip(skip).limit(page_size)
+            
+            orders = []
+            for order_doc in orders_cursor:
+                order_info = {
+                    "order_id": order_doc["_id"],
+                    "store_id": order_doc["store_id"],
+                    "status": order_doc["status"],
+                    "total_amount": order_doc["total_amount"],
+                    "create_time": order_doc.get("create_time"),
+                    "pay_time": order_doc.get("pay_time"),
+                    "ship_time": order_doc.get("ship_time"),
+                    "deliver_time": order_doc.get("deliver_time"),
+                    "items": order_doc.get("items", [])
+                }
+                orders.append(order_info)
+            
+            # 分页
+            total_pages = (total_count + page_size - 1) // page_size
+            result = {
+                "orders": orders,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_count": total_count,
+                    "total_pages": total_pages,
+                    "has_next": page < total_pages,
+                    "has_prev": page > 1
+                }
             }
             
         except pymongo.errors.PyMongoError as e:
@@ -339,4 +360,4 @@ class Buyer(db_conn.DBConn):
             code, msg, _ = error.exception_to_tuple3(e)
             return code, msg, {}
         
-        return 200, "ok", order_info
+        return 200, "ok", result
