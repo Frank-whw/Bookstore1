@@ -142,6 +142,27 @@ class Seller(db_conn.DBConn):
             if order_doc.get("status") != "paid":
                 return error.error_order_status_mismatch(order_id)
             
+            # 检查库存是否充足
+            store_id = order_doc["store_id"]
+            items = order_doc.get("items", [])
+            
+            for item in items:
+                book_id = item["book_id"]
+                quantity = item["quantity"]
+                
+                # 获取当前库存
+                store_doc_check = self.db["Stores"].find_one(
+                    {"_id": store_id, "inventory": {"$elemMatch": {"book_id": book_id}}},
+                    {"inventory.$": 1}
+                )
+                
+                if store_doc_check is None or "inventory" not in store_doc_check or not store_doc_check["inventory"]:
+                    return error.error_non_exist_book_id(book_id)
+                
+                current_stock = store_doc_check["inventory"][0].get("stock_level", 0)
+                if current_stock < quantity:
+                    return error.error_stock_level_low(book_id)
+                    
             result = self.db["Orders"].update_one(
                 {"_id": order_id, "status": "paid"},
                 {
@@ -154,6 +175,33 @@ class Seller(db_conn.DBConn):
             
             if result.modified_count == 0:
                 return error.error_order_status_mismatch(order_id)
+            
+            # 发货后库存减少
+            for item in items:
+                book_id = item["book_id"]
+                quantity = item["quantity"]
+                
+                stock_result = self.db["Stores"].update_one(
+                    {
+                        "_id": store_id, 
+                        "inventory.book_id": book_id,
+                        "inventory.stock_level": {"$gte": quantity}
+                    },
+                    {
+                        "$inc": {"inventory.$.stock_level": -quantity}
+                    }
+                )
+                
+                # 库存减少失败，回滚订单状态
+                if stock_result.modified_count == 0:
+                    self.db["Orders"].update_one(
+                        {"_id": order_id, "status": "shipped"},
+                        {
+                            "$set": {"status": "paid"},
+                            "$unset": {"ship_time": ""}
+                        }
+                    )
+                    return error.error_stock_level_low(book_id)
                 
         except pymongo.errors.PyMongoError as e:
             code, msg, _ = error.exception_db_to_tuple3(e)
