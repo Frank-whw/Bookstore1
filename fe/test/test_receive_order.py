@@ -56,12 +56,15 @@ class TestReceiveOrder:
         assert code != 200
 
     def test_order_status_unshipped(self):
-        gen_book = GenBook(self.seller_id, self.store_id)
+        # 创建新的卖家和店铺来避免重复注册
+        temp_seller_id = "test_receive_order_temp_seller_{}".format(str(uuid.uuid1()))
+        temp_store_id = "test_receive_order_temp_store_{}".format(str(uuid.uuid1()))
+        gen_book = GenBook(temp_seller_id, temp_store_id)
         ok, buy_book_id_list = gen_book.gen(
             non_exist_book_id=False, low_stock_level=False, max_book_count=3
         )
         assert ok
-        code, order_id = self.buyer.new_order(self.store_id, buy_book_id_list)
+        code, order_id = self.buyer.new_order(temp_store_id, buy_book_id_list)
         assert code == 200
         
         # 支付但不发货
@@ -81,12 +84,15 @@ class TestReceiveOrder:
         assert code != 200
 
     def test_order_status_unpaid(self):
-        gen_book = GenBook(self.seller_id, self.store_id)
+        # 创建新的卖家和店铺来避免重复注册
+        temp_seller_id = "test_receive_order_temp_seller2_{}".format(str(uuid.uuid1()))
+        temp_store_id = "test_receive_order_temp_store2_{}".format(str(uuid.uuid1()))
+        gen_book = GenBook(temp_seller_id, temp_store_id)
         ok, buy_book_id_list = gen_book.gen(
             non_exist_book_id=False, low_stock_level=False, max_book_count=3
         )
         assert ok
-        code, unpaid_order_id = self.buyer.new_order(self.store_id, buy_book_id_list)
+        code, unpaid_order_id = self.buyer.new_order(temp_store_id, buy_book_id_list)
         assert code == 200
         
         code = self.buyer.receive_order(unpaid_order_id)
