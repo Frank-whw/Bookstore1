@@ -60,3 +60,16 @@ def query_orders():
     b = Buyer()
     code, message, result = b.query_orders(user_id, status, page)
     return jsonify({"message": message, "result": result}), code
+@bp_buyer.route("/cancel_order", methods=["POST"])
+def cancel_order():
+    user_id: str = request.json.get("user_id")
+    order_id: str = request.json.get("order_id")
+    
+    b = Buyer()
+    code, message = b.cancel_order(user_id, order_id)
+    return jsonify({"message": message}), code
+
+@bp_buyer.route("/auto_cancel_timeout", methods=["POST"])
+def auto_cancel_timeout_orders():
+    code, message, cancelled_count = Buyer.auto_cancel_timeout_orders()
+    return jsonify({"message": message, "cancelled_count": cancelled_count}), code

@@ -71,3 +71,21 @@ class Buyer:
         r = requests.post(url, headers=headers, json=json)
         response_json = r.json()
         return r.status_code, response_json.get("result", {})
+
+    def cancel_order(self, order_id: str) -> int:
+        json = {
+            "user_id": self.user_id,
+            "order_id": order_id,
+        }
+        url = urljoin(self.url_prefix, "cancel_order")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        return r.status_code
+
+    @staticmethod
+    def auto_cancel_timeout_orders(url_prefix: str) -> (int, int):
+        json = {}
+        url = urljoin(urljoin(url_prefix, "buyer/"), "auto_cancel_timeout")
+        r = requests.post(url, json=json)
+        response_json = r.json()
+        return r.status_code, response_json.get("cancelled_count", 0)

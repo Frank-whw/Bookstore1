@@ -361,3 +361,95 @@ class Buyer(db_conn.DBConn):
             return code, msg, {}
         
         return 200, "ok", result
+
+    def cancel_order(self, user_id: str, order_id: str) -> (int, str):
+        try:
+            if not self.user_id_exist(user_id):
+                return error.error_non_exist_user_id(user_id)
+                
+            if not self.order_id_exist(order_id):
+                return error.error_invalid_order_id(order_id)
+            
+            # 获取订单信息
+            order_doc = self.db["Orders"].find_one({"_id": order_id})
+            if order_doc is None:
+                return error.error_invalid_order_id(order_id)
+
+            if order_doc["buyer_id"] != user_id:
+                return error.error_authorization_fail()
+            
+            status = order_doc.get("status")
+            if status not in ["unpaid", "paid"]:
+                return error.error_and_message(400, "订单状态不允许取消")
+            
+            # 如果是已支付订单，需要退款
+            if status == "paid":
+                total_amount = order_doc.get("total_amount", 0)
+                result = self.db["Users"].update_one(
+                    {"_id": user_id},
+                    {"$inc": {"balance": total_amount}}
+                )
+                if result.modified_count == 0:
+                    return error.error_non_exist_user_id(user_id)
+            
+            result = self.db["Orders"].update_one(
+                {"_id": order_id, "status": status},
+                {
+                    "$set": {
+                        "status": "cancelled",
+                        "cancel_time": time.time()
+                    }
+                }
+            )
+            
+            if result.modified_count == 0:
+                return error.error_and_message(400, "订单状态已变更，取消失败")
+                
+        except pymongo.errors.PyMongoError as e:
+            code, msg, _ = error.exception_db_to_tuple3(e)
+            return code, msg
+        except BaseException as e:
+            code, msg, _ = error.exception_to_tuple3(e)
+            return code, msg
+        
+        return 200, "ok"
+
+    @staticmethod
+    def auto_cancel_timeout_orders() -> (int, str, int):
+        # 自动取消超时订单：扫描未支付且超过24小时的订单
+        # 使用索引 (status, create_time) 进行高效扫描
+        try:
+            from be.model.store import get_db
+            db = get_db()
+            timeout_threshold = time.time() - 24 * 3600
+
+            timeout_orders = db["Orders"].find({
+                "status": "unpaid",
+                "create_time": {"$lt": timeout_threshold}
+            })
+            
+            cancelled_count = 0
+            current_time = time.time()
+            
+            for order in timeout_orders:
+                # 更新订单状态，记录自动取消时间
+                result = db["Orders"].update_one(
+                    {"_id": order["_id"], "status": "unpaid"},
+                    {
+                        "$set": {
+                            "status": "cancelled",
+                            "timeout_at": current_time
+                        }
+                    }
+                )
+                if result.modified_count > 0:
+                    cancelled_count += 1
+                    
+        except pymongo.errors.PyMongoError as e:
+            code, msg, _ = error.exception_db_to_tuple3(e)
+            return code, msg, 0
+        except BaseException as e:
+            code, msg, _ = error.exception_to_tuple3(e)
+            return code, msg, 0
+        
+        return 200, "ok", cancelled_count
