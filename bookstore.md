@@ -16,7 +16,7 @@
   - [x] 添加订单状态相关错误码
 - [x] 修改[seller.py](be/model/seller.py) - 卖家相关业务逻辑
   - [x] 适配新的Stores集合结构
-  - [ ] 实现发货功能
+  - [x] 实现发货功能
   - [ ] 添加订单管理功能
 - [x] 修改[user.py](be/model/user.py) - 用户认证逻辑
   - [x] 适配MongoDB的用户数据操作
