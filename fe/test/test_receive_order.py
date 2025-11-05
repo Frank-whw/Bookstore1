@@ -5,6 +5,7 @@ from fe.test.gen_book_data import GenBook
 from fe.access.new_buyer import register_new_buyer
 from fe.access.seller import Seller
 from fe.access.book import Book
+from be.model.store import get_db
 import uuid
 
 
@@ -113,14 +114,18 @@ class TestReceiveOrder:
         assert code != 200
 
     def test_seller_balance_increase(self):
+        # 获取收货前卖家余额
+        db = get_db()
+        seller_doc = db["Users"].find_one({"_id": self.seller_id}, {"balance": 1})
+        initial_balance = seller_doc.get("balance", 0) if seller_doc else 0
+        
         # 收货
         code = self.buyer.receive_order(self.order_id)
         assert code == 200
         
-        # 验证订单状态变为已收货
-        code, order_info = self.buyer.query_order_status(self.order_id)
-        assert code == 200
-        assert order_info.get("status") == "delivered"
+        # 验证卖家余额增加
+        seller_doc = db["Users"].find_one({"_id": self.seller_id}, {"balance": 1})
+        current_balance = seller_doc.get("balance", 0) if seller_doc else 0
+        expected_balance = initial_balance + self.total_price
         
-        # 验证订单金额正确
-        assert order_info.get("total_amount") == self.total_price
+        assert current_balance == expected_balance
