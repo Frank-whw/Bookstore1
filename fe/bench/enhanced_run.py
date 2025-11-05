@@ -54,34 +54,25 @@ def run_book_search_index_comparison():
     logging.info("3.参数化索引搜索")
     run_search_performance_test("param_index")
 
-def run_order_index_performance_comparison():
-    """订单索引性能对比: 查询效率vs更新效率"""
-    logging.info("订单索引性能对比")
+def run_order_index_query_comparison():
+    """订单索引查询对比: 无索引 vs 有索引"""
+    logging.info("订单索引查询对比")
     
-    logging.info("1.订单查询性能(索引受益)")
-    run_order_performance_test("query")
+    logging.info("1.无索引订单查询")
+    run_order_query_test(use_index=False)
     
-    logging.info("2.订单更新性能(索引开销)")
-    run_order_performance_test("update")
-def run_inventory_index_performance_test():
-    """库存多键索引性能测试: 查询vs更新"""
-    logging.info("库存多键索引性能测试")
-    
-    logging.info("1.库存查询性能")
-    run_inventory_performance_test("query")
-    
-    logging.info("2.库存更新性能")
-    run_inventory_performance_test("update")
+    logging.info("2.有索引订单查询")
+    run_order_query_test(use_index=True)
 
-def run_order_snapshot_redundancy_test():
-    """订单快照冗余数据性能测试: 查询优势vs插入开销"""
-    logging.info("订单快照冗余数据性能测试")
+def run_order_snapshot_query_comparison():
+    """订单快照查询对比: 无冗余数据 vs 有冗余数据"""
+    logging.info("订单快照查询对比")
     
-    logging.info("1.快照查询性能(冗余数据优势)")
-    run_snapshot_performance_test("query")
+    logging.info("1.无冗余数据查询(需要关联)")
+    run_snapshot_query_test(use_redundant=False)
     
-    logging.info("2.快照插入性能(冗余数据开销)")
-    run_snapshot_performance_test("insert")
+    logging.info("2.有冗余数据查询(直接查询)")
+    run_snapshot_query_test(use_redundant=True)
 def run_search_performance_test(search_type: str):
     """搜索性能测试"""
     from fe.bench.enhanced_workload import SearchBooks, NoIndexSearchBooks
@@ -94,7 +85,7 @@ def run_search_performance_test(search_type: str):
     buyer_client = Buyer(url_prefix=conf.URL, user_id=buyer_id, password="password")
     
     test_keywords = ['小说', '文学', '历史', '科学', '技术', '中国']
-    test_count = 30
+    test_count = 15000
     
     total_time = 0
     success_count = 0
@@ -125,9 +116,6 @@ def run_search_performance_test(search_type: str):
         
         if success:
             success_count += 1
-        
-        if (i + 1) % 10 == 0:
-            logging.info(f"进度: {i+1}/{test_count}")
     
     avg_latency = total_time / test_count
     success_rate = (success_count / test_count) * 100
@@ -139,9 +127,8 @@ def run_search_performance_test(search_type: str):
     logging.info(f"  TPS: {tps:.1f}")
 
 
-def run_order_performance_test(test_type: str):
-    """订单性能测试"""
-    from fe.bench.enhanced_workload import OrderQueryTest, OrderUpdateTest
+def run_order_query_test(use_index: bool):
+    """订单查询测试 - 对比有无索引的性能"""
     from fe.access.new_buyer import register_new_buyer
     from fe.access.buyer import Buyer
     from fe import conf
@@ -151,22 +138,34 @@ def run_order_performance_test(test_type: str):
     buyer = register_new_buyer(buyer_id, "password")
     buyer_client = Buyer(url_prefix=conf.URL, user_id=buyer_id, password="password")
     
-    test_count = 20
+    test_count = 6000
     total_time = 0
     success_count = 0
     
-    logging.info(f"开始订单{test_type}测试: {test_count} 次")
+    index_type = "有索引" if use_index else "无索引"
+    logging.info(f"开始{index_type}订单查询测试: {test_count} 次")
     
     for i in range(test_count):
-        if test_type == "query":
-            operation = OrderQueryTest(buyer_client)
-        else:  # update
-            operation = OrderUpdateTest(buyer_client)
-        
         start_time = time.time()
-        success = operation.run()
-        end_time = time.time()
+        from be.model.store import get_db
+        db = get_db()
+        try:
+            if use_index:
+                # 使用索引的查询 - 利用复合索引 (buyer_id, create_time)
+                orders = list(db["Orders"].find(
+                    {"buyer_id": buyer_id}
+                ).sort("create_time", -1).limit(10))
+                success = True
+            else:
+                # 无索引查询 - 强制全表扫描（禁用索引）
+                orders = list(db["Orders"].find(
+                    {"buyer_id": buyer_id}
+                ).hint({"$natural": 1}).limit(10))  # hint强制不使用索引
+                success = True
+        except Exception as e:
+            success = False
         
+        end_time = time.time()
         elapsed = end_time - start_time
         total_time += elapsed
         
@@ -177,77 +176,51 @@ def run_order_performance_test(test_type: str):
     success_rate = (success_count / test_count) * 100
     tps = success_count / total_time if total_time > 0 else 0
     
-    logging.info(f"订单{test_type} 结果:")
+    logging.info(f"{index_type}订单查询结果:")
     logging.info(f"  平均延迟: {avg_latency:.3f}s")
     logging.info(f"  成功率: {success_rate:.1f}%")
     logging.info(f"  TPS: {tps:.1f}")
 
 
-def run_inventory_performance_test(test_type: str):
-    """库存性能测试"""
-    from fe.bench.enhanced_workload import InventoryQueryTest, InventoryUpdateTest
-    from fe.access.new_seller import register_new_seller
-    from fe.access.seller import Seller
-    from fe import conf
-    import uuid
-    
-    seller_id = f"inventory_test_{uuid.uuid1()}"
-    seller = register_new_seller(seller_id, "password")
-    seller_client = Seller(url_prefix=conf.URL, seller_id=seller_id, password="password")
-    
-    test_count = 20
-    total_time = 0
-    success_count = 0
-    
-    logging.info(f"开始库存{test_type}测试: {test_count} 次")
-    
-    for i in range(test_count):
-        if test_type == "query":
-            operation = InventoryQueryTest(seller_client)
-        else:  # update
-            operation = InventoryUpdateTest(seller_client)
-        
-        start_time = time.time()
-        success = operation.run()
-        end_time = time.time()
-        
-        elapsed = end_time - start_time
-        total_time += elapsed
-        
-        if success:
-            success_count += 1
-    
-    avg_latency = total_time / test_count
-    success_rate = (success_count / test_count) * 100
-    tps = success_count / total_time if total_time > 0 else 0
-    
-    logging.info(f"库存{test_type} 结果:")
-    logging.info(f"  平均延迟: {avg_latency:.3f}s")
-    logging.info(f"  成功率: {success_rate:.1f}%")
-    logging.info(f"  TPS: {tps:.1f}")
-
-
-def run_snapshot_performance_test(test_type: str):
-    """订单快照性能测试"""
-    from fe.bench.enhanced_workload import OrderSnapshotQueryTest, OrderSnapshotInsertTest
+def run_snapshot_query_test(use_redundant: bool):
+    """订单快照查询测试"""
     import time
     
-    test_count = 20
+    test_count = 3000
     total_time = 0
     success_count = 0
     
-    logging.info(f"开始快照{test_type}测试: {test_count} 次")
+    redundant_type = "有冗余数据" if use_redundant else "无冗余数据"
+    logging.info(f"开始{redundant_type}查询测试: {test_count} 次")
     
     for i in range(test_count):
-        if test_type == "query":
-            operation = OrderSnapshotQueryTest()
-        else:  # insert
-            operation = OrderSnapshotInsertTest()
-        
         start_time = time.time()
-        success = operation.run()
-        end_time = time.time()
         
+        from be.model.store import get_db
+        db = get_db()
+        
+        try:
+            if use_redundant:
+                # 有冗余数据：直接从订单快照中查询商品信息
+                orders = list(db["Orders"].find(
+                    {"items.book_snapshot": {"$exists": True}},
+                    {"items.book_snapshot.title": 1, "items.book_snapshot.tag": 1}
+                ).limit(10))
+                success = True
+            else:
+                # 无冗余数据：需要关联查询Orders和Books集合
+                orders = list(db["Orders"].find({}, {"items.book_id": 1}).limit(10))
+                for order in orders:
+                    for item in order.get("items", []):
+                        book_id = item.get("book_id")
+                        if book_id:
+                            # 需要额外查询Books集合获取书籍信息
+                            book = db["Books"].find_one({"_id": book_id}, {"title": 1, "tags": 1})
+                success = True
+        except Exception as e:
+            success = False
+        
+        end_time = time.time()
         elapsed = end_time - start_time
         total_time += elapsed
         
@@ -258,7 +231,7 @@ def run_snapshot_performance_test(test_type: str):
     success_rate = (success_count / test_count) * 100
     tps = success_count / total_time if total_time > 0 else 0
     
-    logging.info(f"快照{test_type} 结果:")
+    logging.info(f"{redundant_type}查询结果:")
     logging.info(f"  平均延迟: {avg_latency:.3f}s")
     logging.info(f"  成功率: {success_rate:.1f}%")
     logging.info(f"  TPS: {tps:.1f}")
@@ -271,25 +244,22 @@ if __name__ == "__main__":
         datefmt='%H:%M:%S'
     )
     
-    print("数据库索引性能测试:")
-    print("1. 综合功能测试")
-    print("2. 书籍搜索索引对比")
-    print("3. 订单索引性能对比")
-    print("4. 库存多键索引测试")
-    print("5. 订单快照冗余数据测试")
+    print("数据库结构&操作性能测试:")
+    print("1.综合功能测试")
+    print("2.书籍搜索索引对比")
+    print("3.订单索引查询对比")
+    print("4.订单快照查询对比")
     
-    choice = input("选择 (1-5): ").strip()
+    choice = input("选择(1-4):").strip()
     
     if choice == "1":
         run_enhanced_bench()
     elif choice == "2":
         run_book_search_index_comparison()
     elif choice == "3":
-        run_order_index_performance_comparison()
+        run_order_index_query_comparison()
     elif choice == "4":
-        run_inventory_index_performance_test()
-    elif choice == "5":
-        run_order_snapshot_redundancy_test()
+        run_order_snapshot_query_comparison()
     else:
         print("默认运行综合测试")
         run_enhanced_bench()

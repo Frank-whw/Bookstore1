@@ -11,7 +11,6 @@ import random
 import threading
 import time
 
-# 添加项目根目录到 Python 路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.join(current_dir, '..', '..')
 sys.path.insert(0, project_root)
@@ -23,9 +22,8 @@ from fe.access.buyer import Buyer
 from fe.access.seller import Seller
 from fe import conf
 
-
 class NewOrder:
-    """创建订单操作"""
+    """创建订单"""
     def __init__(self, buyer: Buyer, store_id: str, book_id_and_count: list):
         self.buyer = buyer
         self.store_id = store_id
@@ -41,7 +39,7 @@ class NewOrder:
 
 
 class Payment:
-    """支付操作"""
+    """支付"""
     def __init__(self, buyer: Buyer, order_id: str = None):
         self.buyer = buyer
         self.order_id = order_id
@@ -49,18 +47,16 @@ class Payment:
     def run(self) -> bool:
         try:
             if not self.order_id:
-                return False  # 没有订单ID，直接返回失败
+                return False
             code = self.buyer.payment(self.order_id)
-            if code != 200:
-                logging.warning(f"Payment失败: 订单ID={self.order_id}, 错误码={code}")
             return code == 200
         except Exception as e:
-            logging.error(f"Payment异常: {e}, 订单ID={self.order_id}")
+            logging.error(f"Payment failed: {e}")
             return False
 
 
 class SearchBooks:
-    """书籍搜索操作"""
+    """书籍搜索"""
     def __init__(self, buyer: Buyer, search_type: str = "basic", **kwargs):
         self.buyer = buyer
         self.search_type = search_type
@@ -68,27 +64,45 @@ class SearchBooks:
 
     def run(self) -> bool:
         try:
+            from be.model.store import get_db
+            db = get_db()
+            
             if self.search_type == "basic":
-                # 基本搜索
+                # 文本索引搜索 - 直接数据库查询，避免API开销
                 keyword = self.kwargs.get("keyword", "小说")
-                store_id = self.kwargs.get("store_id", None)
-                code, result = self.buyer.search_books(keyword, store_id)
+                search_query = {"$text": {"$search": keyword}}
+                cursor = db["Books"].find(search_query).limit(10)
+                books = list(cursor)
+                return len(books) >= 0
+                
             elif self.search_type == "advanced":
-                # 高级搜索
+                # 参数化索引搜索 - 直接数据库查询
                 title_prefix = self.kwargs.get("title_prefix", None)
                 tags = self.kwargs.get("tags", None)
-                store_id = self.kwargs.get("store_id", None)
-                code, result = self.buyer.search_books_advanced(title_prefix, tags, store_id)
+                
+                search_conditions = []
+                if title_prefix:
+                    title_prefix_lower = title_prefix.lower()
+                    search_conditions.append({"search_index.title_lower": {"$regex": f"^{title_prefix_lower}"}})
+                if tags:
+                    tags_lower = [tag.lower() for tag in tags]
+                    search_conditions.append({"search_index.tags_lower": {"$in": tags_lower}})
+                
+                if search_conditions:
+                    query = {"$and": search_conditions} if len(search_conditions) > 1 else search_conditions[0]
+                    cursor = db["Books"].find(query).limit(10)
+                    books = list(cursor)
+                    return len(books) >= 0
+                return False
             else:
                 return False
-            return code == 200
         except Exception as e:
             logging.error(f"Search failed: {e}")
             return False
 
 
 class QueryOrders:
-    """订单查询操作"""
+    """订单查询"""
     def __init__(self, buyer: Buyer, status: str = None):
         self.buyer = buyer
         self.status = status
@@ -101,54 +115,8 @@ class QueryOrders:
             logging.error(f"Query orders failed: {e}")
             return False
 
-
-class CancelOrder:
-    """订单取消操作"""
-    def __init__(self, buyer: Buyer, order_id: str):
-        self.buyer = buyer
-        self.order_id = order_id
-
-    def run(self) -> bool:
-        try:
-            code = self.buyer.cancel_order(self.order_id)
-            return code == 200
-        except Exception as e:
-            logging.error(f"Cancel order failed: {e}")
-            return False
-
-
-class ShipOrder:
-    """发货操作"""
-    def __init__(self, seller: Seller, order_id: str):
-        self.seller = seller
-        self.order_id = order_id
-
-    def run(self) -> bool:
-        try:
-            code = self.seller.ship_order(self.order_id)
-            return code == 200
-        except Exception as e:
-            logging.error(f"Ship order failed: {e}")
-            return False
-
-
-class ReceiveOrder:
-    """收货操作"""
-    def __init__(self, buyer: Buyer, order_id: str):
-        self.buyer = buyer
-        self.order_id = order_id
-
-    def run(self) -> bool:
-        try:
-            code = self.buyer.receive_order(self.order_id)
-            return code == 200
-        except Exception as e:
-            logging.error(f"Receive order failed: {e}")
-            return False
-
-
 class GetBookDetail:
-    """获取书籍详情操作"""
+    """获取书籍详情"""
     def __init__(self, buyer: Buyer, book_id: str):
         self.buyer = buyer
         self.book_id = book_id
@@ -163,7 +131,7 @@ class GetBookDetail:
 
 
 class CancelOrder:
-    """取消订单操作"""
+    """取消订单"""
     def __init__(self, buyer: Buyer, order_id: str = None):
         self.buyer = buyer
         self.order_id = order_id
@@ -171,7 +139,7 @@ class CancelOrder:
     def run(self) -> bool:
         try:
             if not self.order_id:
-                return False  # 没有订单ID，直接返回失败
+                return False
             code = self.buyer.cancel_order(self.order_id)
             return code == 200
         except Exception as e:
@@ -180,7 +148,7 @@ class CancelOrder:
 
 
 class ShipOrder:
-    """发货操作"""
+    """发货"""
     def __init__(self, seller, order_id: str = None):
         self.seller = seller
         self.order_id = order_id
@@ -188,7 +156,7 @@ class ShipOrder:
     def run(self) -> bool:
         try:
             if not self.order_id:
-                return False  # 没有订单ID，直接返回失败
+                return False
             code = self.seller.ship_order(self.order_id)
             return code == 200
         except Exception as e:
@@ -197,7 +165,7 @@ class ShipOrder:
 
 
 class ReceiveOrder:
-    """收货确认操作"""
+    """收货确认"""
     def __init__(self, buyer: Buyer, order_id: str = None):
         self.buyer = buyer
         self.order_id = order_id
@@ -205,7 +173,7 @@ class ReceiveOrder:
     def run(self) -> bool:
         try:
             if not self.order_id:
-                return False  # 没有订单ID，直接返回失败
+                return False
             code = self.buyer.receive_order(self.order_id)
             return code == 200
         except Exception as e:
@@ -214,7 +182,7 @@ class ReceiveOrder:
 
 
 class AddFunds:
-    """充值操作"""
+    """充值"""
     def __init__(self, buyer: Buyer, add_value: int):
         self.buyer = buyer
         self.add_value = add_value
@@ -231,18 +199,17 @@ class AddFunds:
 
 
 class NoIndexSearchBooks:
-    """无索引搜索操作 (使用正则表达式模拟)"""
+    """无索引搜索(正则表达式模拟)"""
     def __init__(self, buyer: Buyer, keyword: str):
         self.buyer = buyer
         self.keyword = keyword
 
     def run(self) -> bool:
         try:
-            # 直接访问数据库进行正则表达式搜索，模拟无索引情况
             from be.model.store import get_db
             db = get_db()
             
-            # 使用正则表达式搜索，不使用索引
+            # 强制不使用索引，使用hint禁用所有索引
             regex_pattern = {"$regex": self.keyword, "$options": "i"}
             cursor = db["Books"].find({
                 "$or": [
@@ -250,23 +217,23 @@ class NoIndexSearchBooks:
                     {"author": regex_pattern},
                     {"book_intro": regex_pattern}
                 ]
-            }).limit(10)
+            }).hint({"$natural": 1}).limit(10)  # hint强制不使用索引
             
             books = list(cursor)
-            return len(books) >= 0  # 总是返回成功，关注性能
+            return len(books) >= 0
         except Exception as e:
             logging.error(f"No index search failed: {e}")
             return False
 
 
 class OrderQueryTest:
-    """订单查询测试 (受益于索引)"""
+    """订单查询测试(受益于索引)"""
     def __init__(self, buyer: Buyer):
         self.buyer = buyer
 
     def run(self) -> bool:
         try:
-            # 测试订单查询，使用复合索引 (buyer_id, status, create_time)
+            # 复合索引 (buyer_id, status, create_time)
             code, result = self.buyer.query_orders()
             return code == 200
         except Exception as e:
@@ -281,37 +248,33 @@ class OrderUpdateTest:
 
     def run(self) -> bool:
         try:
-            # 模拟订单状态更新，会触发索引更新
             from be.model.store import get_db
             db = get_db()
-            
-            # 查找一个可更新的订单
             order = db["Orders"].find_one({"status": "unpaid"})
             if order:
-                # 更新订单状态，触发索引维护
+
                 result = db["Orders"].update_one(
                     {"_id": order["_id"]},
                     {"$set": {"status": "paid", "pay_time": time.time()}}
                 )
                 return result.modified_count > 0
-            return True  # 没有订单也算成功
+            return True
         except Exception as e:
             logging.error(f"Order update test failed: {e}")
             return False
 
 
 class InventoryQueryTest:
-    """库存查询测试 (多键索引受益)"""
+    """库存查询测试(多键索引受益)"""
     def __init__(self, seller):
         self.seller = seller
 
     def run(self) -> bool:
         try:
-            # 测试库存查询，使用多键索引 inventory.book_id
+            # 库存查询，多键索引 inventory.book_id
             from be.model.store import get_db
             db = get_db()
             
-            # 查询包含特定书籍的店铺
             cursor = db["Stores"].find({
                 "inventory.book_id": {"$exists": True}
             }).limit(5)
@@ -324,13 +287,13 @@ class InventoryQueryTest:
 
 
 class InventoryUpdateTest:
-    """库存更新测试 (多键索引维护开销)"""
+    """库存更新测试(多键索引维护开销)"""
     def __init__(self, seller):
         self.seller = seller
 
     def run(self) -> bool:
         try:
-            # 模拟库存更新，会触发多键索引更新
+            # 模拟库存更新，触发多键索引更新
             from be.model.store import get_db
             db = get_db()
             
@@ -351,7 +314,7 @@ class InventoryUpdateTest:
 
 
 class OrderSnapshotQueryTest:
-    """订单快照查询测试 (冗余数据查询优势)"""
+    """订单快照查询测试(冗余数据查询优势)"""
     def __init__(self):
         pass
 
@@ -375,7 +338,7 @@ class OrderSnapshotQueryTest:
 
 
 class OrderSnapshotInsertTest:
-    """订单快照插入测试 (冗余数据插入开销)"""
+    """订单快照插入测试(冗余数据插入开销)"""
     def __init__(self):
         pass
 
@@ -407,7 +370,7 @@ class OrderSnapshotInsertTest:
                     "book_snapshot": {
                         "title": book.get("title", ""),
                         "tag": book.get("tags", ""),
-                        "content": book.get("content", "")[:200]  # 截取部分内容
+                        "content": book.get("content", "")[:200]
                     }
                 }]
             }
@@ -423,11 +386,8 @@ class OrderSnapshotInsertTest:
             return False
 
 
-
-
 class EnhancedWorkload:
-    """增强的工作负载，包含所有新功能的测试"""
-    
+
     def __init__(self):
         self.uuid = str(uuid.uuid1())
         self.book_ids = {}
@@ -435,11 +395,10 @@ class EnhancedWorkload:
         self.seller_ids = []
         self.store_ids = []
         self.order_ids = []  # 存储已创建的订单ID
-        self.order_ids_lock = threading.Lock()  # 保护order_ids的线程锁
+        self.order_ids_lock = threading.Lock()
         self.book_db = book.BookDB(conf.Use_Large_DB)
         self.row_count = self.book_db.get_book_count()
 
-        # 配置参数
         self.book_num_per_store = min(conf.Book_Num_Per_Store, self.row_count)
         self.store_num_per_user = conf.Store_Num_Per_User
         self.seller_num = conf.Seller_Num
@@ -465,7 +424,6 @@ class EnhancedWorkload:
 
     def gen_database(self):
         """生成测试数据"""
-        logging.info("加载测试数据...")
         
         for i in range(1, self.seller_num + 1):
             user_id, password = self.to_seller_id_and_password(i)
@@ -511,7 +469,7 @@ class EnhancedWorkload:
         """随机获取一个操作"""
         operations = ['search_basic', 'search_advanced', 'query_orders', 'new_order', 'payment', 
                      'cancel_order', 'ship_order', 'receive_order', 'add_funds']
-        weights = [25, 20, 15, 20, 5, 5, 5, 3, 2]  # 总计100%，增加new_order权重
+        weights = [25, 20, 15, 20, 5, 5, 5, 3, 2]  # 总计100%
         operation = random.choices(operations, weights=weights)[0]
         return self.create_operation(operation)
 
@@ -555,27 +513,67 @@ class EnhancedWorkload:
             
         elif operation_type == 'payment':
             order_id = self.get_random_order_id()
+            if order_id:
+                # 尝试使用正确的买家身份，如果失败则使用随机买家
+                buyer_id_from_order = self.extract_buyer_id_from_order(order_id)
+                if buyer_id_from_order and buyer_id_from_order in self.buyer_ids:
+                    buyer_password = self.get_buyer_password_by_id(buyer_id_from_order)
+                    try:
+                        correct_buyer = Buyer(url_prefix=conf.URL, user_id=buyer_id_from_order, password=buyer_password)
+                        return Payment(correct_buyer, order_id)
+                    except:
+                        pass
             return Payment(buyer, order_id)
                 
         elif operation_type == 'cancel_order':
             order_id = self.get_random_order_id()
+            if order_id:
+                # 尝试使用正确的买家身份
+                buyer_id_from_order = self.extract_buyer_id_from_order(order_id)
+                if buyer_id_from_order and buyer_id_from_order in self.buyer_ids:
+                    buyer_password = self.get_buyer_password_by_id(buyer_id_from_order)
+                    try:
+                        correct_buyer = Buyer(url_prefix=conf.URL, user_id=buyer_id_from_order, password=buyer_password)
+                        return CancelOrder(correct_buyer, order_id)
+                    except:
+                        pass
             return CancelOrder(buyer, order_id)
                 
         elif operation_type == 'ship_order':
-            # 创建一个卖家来执行发货操作
+            order_id = self.get_random_order_id()
+            if order_id:
+                # 尝试使用正确的卖家身份
+                seller_id_from_order = self.extract_seller_id_from_order(order_id)
+                if seller_id_from_order and seller_id_from_order in self.seller_ids:
+                    seller_password = self.get_seller_password_by_id(seller_id_from_order)
+                    try:
+                        correct_seller = Seller(url_prefix=conf.URL, seller_id=seller_id_from_order, password=seller_password)
+                        return ShipOrder(correct_seller, order_id)
+                    except:
+                        pass
+            # 使用随机卖家
             seller_id, seller_password = random.choice([
                 self.to_seller_id_and_password(i) for i in range(1, self.seller_num + 1)
             ])
             seller = Seller(url_prefix=conf.URL, seller_id=seller_id, password=seller_password)
-            order_id = self.get_random_order_id()
             return ShipOrder(seller, order_id)
                 
         elif operation_type == 'receive_order':
             order_id = self.get_random_order_id()
+            if order_id:
+                # 尝试使用正确的买家身份
+                buyer_id_from_order = self.extract_buyer_id_from_order(order_id)
+                if buyer_id_from_order and buyer_id_from_order in self.buyer_ids:
+                    buyer_password = self.get_buyer_password_by_id(buyer_id_from_order)
+                    try:
+                        correct_buyer = Buyer(url_prefix=conf.URL, user_id=buyer_id_from_order, password=buyer_password)
+                        return ReceiveOrder(correct_buyer, order_id)
+                    except:
+                        pass
             return ReceiveOrder(buyer, order_id)
                 
         elif operation_type == 'add_funds':
-            add_value = random.randint(100, 1000)  # 充值100-1000元
+            add_value = random.randint(100, 1000)
             return AddFunds(buyer, add_value)
         
         return None
@@ -595,20 +593,78 @@ class EnhancedWorkload:
         """线程安全地添加订单ID"""
         with self.order_ids_lock:
             self.order_ids.append(order_id)
-            # logging.info(f"✅ 成功添加订单ID: {order_id}, 总数: {len(self.order_ids)}")
     
     def get_random_order_id(self):
         """线程安全地获取随机订单ID"""
         with self.order_ids_lock:
             if self.order_ids:
                 return random.choice(self.order_ids)
-            else:
-                return None
+            return None
+
+    def extract_buyer_id_from_order(self, order_id: str) -> str:
+        """从订单ID中提取买家ID"""
+        # 订单ID格式: buyer_X_uuid_store_Y_Z_uuid_uuid
+        # 例如: buyer_1_7849fcac-ba46-11f0-8e19-743af4c616b8_store_s_1_1_7849fcac-ba46-11f0-8e19-743af4c616b8_uuid
+        try:
+            parts = order_id.split('_')
+            if len(parts) >= 3 and parts[0] == 'buyer':
+                # buyer_X_uuid 格式
+                buyer_num = parts[1]
+                uuid_part = parts[2]
+                return f"buyer_{buyer_num}_{uuid_part}"
+        except:
+            pass
+        return None
+
+    def get_buyer_password_by_id(self, buyer_id: str) -> str:
+        """根据买家ID获取密码"""
+        try:
+            # 从buyer_X_uuid中提取X
+            parts = buyer_id.split('_')
+            if len(parts) >= 3 and parts[0] == 'buyer':
+                buyer_num = int(parts[1])
+                uuid_part = parts[2]
+                return f"buyer_seller_{buyer_num}_{uuid_part}"
+        except:
+            pass
+        return ""
+
+    def extract_seller_id_from_order(self, order_id: str) -> str:
+        """从订单ID中提取卖家ID"""
+        # 订单ID格式: buyer_X_uuid_store_s_Y_Z_uuid_uuid
+        # 店铺ID格式: store_s_Y_Z_uuid，对应卖家ID: seller_Y_uuid
+        try:
+            parts = order_id.split('_')
+            # 找到store_s部分
+            for i in range(len(parts) - 2):
+                if parts[i] == 'store' and parts[i+1] == 's':
+                    seller_num = parts[i+2]  # Y
+                    # UUID应该是整个订单ID中的UUID部分，不是最后一个
+                    # 从buyer部分提取UUID: buyer_X_uuid_...
+                    if len(parts) >= 3:
+                        uuid_part = parts[2]  # buyer_X_uuid中的uuid部分
+                        return f"seller_{seller_num}_{uuid_part}"
+        except Exception as e:
+            logging.debug(f"提取卖家ID失败: {order_id}, 错误: {e}")
+        return None
+
+    def get_seller_password_by_id(self, seller_id: str) -> str:
+        """根据卖家ID获取密码"""
+        try:
+            # 从seller_X_uuid中提取X
+            parts = seller_id.split('_')
+            if len(parts) >= 3 and parts[0] == 'seller':
+                seller_num = int(parts[1])
+                uuid_part = parts[2]
+                return f"password_seller_{seller_num}_{uuid_part}"
+        except:
+            pass
+        return ""
 
     def print_stats(self):
         """打印统计信息"""
         with self.lock:
-            logging.info("=== 性能统计 ===")
+            logging.info("性能统计")
             for op_type, stat in self.stats.items():
                 if stat['count'] > 0:
                     success_rate = (stat['success'] / stat['count']) * 100

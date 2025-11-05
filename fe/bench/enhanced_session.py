@@ -31,18 +31,20 @@ class EnhancedSession(threading.Thread):
         self.gen_operations()
 
     def gen_operations(self):
-        # 生成测试操作序列
-        for i in range(self.workload.procedure_per_session):
-            operation = self.workload.get_random_operation()
-            if operation:
-                self.operations.append(operation)
+        # 不预生成操作，改为动态生成
+        pass
 
     def run(self):
-        logging.info(f"会话 {self.session_id} 开始: {len(self.operations)} 个操作")
+        total_operations = self.workload.procedure_per_session
+        logging.info(f"会话 {self.session_id} 开始: {total_operations} 个操作")
         
         start_time = time.time()
         
-        for i, operation in enumerate(self.operations):
+        for i in range(total_operations):
+            # 动态生成操作
+            operation = self.workload.get_random_operation()
+            if not operation:
+                continue
             op_start = time.time()
             try:
                 result = operation.run()
@@ -70,7 +72,7 @@ class EnhancedSession(threading.Thread):
             self.workload.update_stats(operation_type, success, elapsed)
             
             if (i + 1) % 200 == 0:
-                progress = (i + 1) / len(self.operations) * 100
+                progress = (i + 1) / total_operations * 100
                 logging.info(f"会话 {self.session_id}: {progress:.0f}%")
         
         end_time = time.time()
