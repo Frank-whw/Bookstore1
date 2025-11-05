@@ -73,3 +73,35 @@ def cancel_order():
 def auto_cancel_timeout_orders():
     code, message, cancelled_count = Buyer.auto_cancel_timeout_orders()
     return jsonify({"message": message, "cancelled_count": cancelled_count}), code
+
+
+@bp_buyer.route("/search_books", methods=["POST"])
+def search_books():
+    keyword: str = request.json.get("keyword")
+    store_id: str = request.json.get("store_id")
+    page: int = request.json.get("page", 1)
+    
+    b = Buyer()
+    code, message, result = b.search_books(keyword, store_id, page)
+    return jsonify({"message": message, "result": result}), code
+
+
+@bp_buyer.route("/search_books_advanced", methods=["POST"])
+def search_books_advanced():
+    title_prefix: str = request.json.get("title_prefix")
+    tags: list = request.json.get("tags")
+    store_id: str = request.json.get("store_id")
+    page: int = request.json.get("page", 1)
+    
+    b = Buyer()
+    code, message, result = b.search_books_advanced(title_prefix, tags, store_id, page)
+    return jsonify({"message": message, "result": result}), code
+
+
+@bp_buyer.route("/book_detail", methods=["POST"])
+def get_book_detail():
+    book_id: str = request.json.get("book_id")
+    
+    b = Buyer()
+    code, message, result = b.get_book_detail(book_id)
+    return jsonify({"message": message, "result": result}), code

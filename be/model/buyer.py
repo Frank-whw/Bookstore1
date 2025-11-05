@@ -256,42 +256,6 @@ class Buyer(db_conn.DBConn):
         except BaseException as e:
             code, msg, _ = error.exception_to_tuple3(e)
             return code, msg
-    
-    # 取消订单
-    def cancel_order(self, user_id: str, order_id: str) -> (int, str):
-        try:
-            db = self.db
-            order_doc = db["Orders"].find_one({"_id": order_id})
-            if order_doc is None:
-                return error.error_invalid_order_id(order_id)
-            if order_doc.get("buyer_id") != user_id:
-                return error.error_authorization_fail()
-            status = order_doc.get("status")
-            if status != "unpaid":
-                if status == "cancelled":
-                    return error.error_order_cancelled(order_id)
-                if status in ("paid", "completed"):
-                    return error.error_order_completed(order_id)
-                return error.error_order_status_mismatch(order_id)
-            updated = db["Orders"].update_one(
-                {"_id": order_id, "status": "unpaid"},
-                {"$set": {"status": "cancelled", "cancel_time": time.time()}}
-            )
-            if updated.matched_count == 0:
-                return error.error_invalid_order_id(order_id)
-            # 买家退款
-            # 直接退款（不需要余额条件），若后续需要事务可加入 session
-            db["Users"].update_one(
-                {"_id": user_id},
-                {"$inc": {"balance": order_doc.get("total_amount", 0)}}
-            )
-            return 200, "ok"
-        except pymongo.errors.PyMongoError as e:
-            code, msg, _ = error.exception_db_to_tuple3(e)
-            return code, msg
-        except BaseException as e:
-            code, msg, _ = error.exception_to_tuple3(e)
-            return code, msg
     def query_orders(self, user_id: str, status: str = None, page: int = 1) -> (int, str, dict):
         try:
             if user_id is None:
@@ -453,3 +417,271 @@ class Buyer(db_conn.DBConn):
             return code, msg, 0
         
         return 200, "ok", cancelled_count
+
+    def search_books(self, keyword: str = None, store_id: str = None, page: int = 1) -> (int, str, dict):
+        """
+        书籍搜索
+        全站搜索：在books集合中设置文本索引，满足"题目、标签、目录/内容"的关键字搜索
+        店铺内搜索：先取店铺的book_id列表，在Books上$text或前缀/标签过滤，并限制_id in 店铺书目列表
+        """
+        try:
+            if keyword is None or keyword.strip() == "":
+                return error.error_and_message(400, "搜索关键字不能为空") + ({},)
+            
+            keyword = keyword.strip()
+            page_size = 10
+            
+            try:
+                page = max(1, int(page)) if page else 1
+            except (ValueError, TypeError):
+                return error.error_and_message(400, "页码参数无效") + ({},)
+            
+            skip = (page - 1) * page_size
+            
+            if store_id and store_id.strip():
+                # 店铺内搜索
+                if not self.store_id_exist(store_id):
+                    return error.error_non_exist_store_id(store_id) + ({},)
+                
+                store_doc = self.db["Stores"].find_one({"_id": store_id}, {"inventory": 1})
+                if not store_doc or "inventory" not in store_doc:
+                    return 200, "ok", {
+                        "books": [],
+                        "pagination": {
+                            "page": page,
+                            "page_size": page_size,
+                            "total_count": 0,
+                            "total_pages": 0,
+                            "has_next": False,
+                            "has_prev": False
+                        }
+                    }
+                
+                book_ids = [item["book_id"] for item in store_doc["inventory"]]
+                if not book_ids:
+                    return 200, "ok", {
+                        "books": [],
+                        "pagination": {
+                            "page": page,
+                            "page_size": page_size,
+                            "total_count": 0,
+                            "total_pages": 0,
+                            "has_next": False,
+                            "has_prev": False
+                        }
+                    }
+                
+                # 在Books集合中搜索
+                search_query = {
+                    "_id": {"$in": book_ids},
+                    "$text": {"$search": keyword}
+                }
+                
+                # 按textScore排序分页
+                total_count = self.db["Books"].count_documents(search_query)
+                books_cursor = self.db["Books"].find(
+                    search_query,
+                    {"score": {"$meta": "textScore"}}
+                ).sort([("score", {"$meta": "textScore"})]).skip(skip).limit(page_size)
+                
+            else:
+                # 全站搜索
+                search_query = {"$text": {"$search": keyword}}
+                
+                # 按textScore排序分页
+                total_count = self.db["Books"].count_documents(search_query)
+                books_cursor = self.db["Books"].find(
+                    search_query,
+                    {"score": {"$meta": "textScore"}}
+                ).sort([("score", {"$meta": "textScore"})]).skip(skip).limit(page_size)
+            
+            books = []
+            for book_doc in books_cursor:
+                book_info = {
+                    "id": book_doc["_id"],
+                    "title": book_doc.get("title", ""),
+                    "author": book_doc.get("author", ""),
+                    "book_intro": book_doc.get("book_intro", ""),
+                    "tags": book_doc.get("tags", [])
+                }
+                if "score" in book_doc:
+                    book_info["text_score"] = book_doc["score"]
+                books.append(book_info)
+            
+            total_pages = (total_count + page_size - 1) // page_size
+            result = {
+                "books": books,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_count": total_count,
+                    "total_pages": total_pages,
+                    "has_next": page < total_pages,
+                    "has_prev": page > 1
+                }
+            }
+            
+        except pymongo.errors.PyMongoError as e:
+            code, msg, _ = error.exception_db_to_tuple3(e)
+            return code, msg, {}
+        except BaseException as e:
+            code, msg, _ = error.exception_to_tuple3(e)
+            return code, msg, {}
+        
+        return 200, "ok", result
+
+    def search_books_advanced(self, title_prefix: str = None, tags: list = None, store_id: str = None, page: int = 1) -> (int, str, dict):
+        """
+        参数化搜索：对高频两项设置前缀/精确索引
+        search_index.title_lower: 题目前缀/不区分大小写匹配
+        search_index.tags_lower: 标签精确或包含匹配
+        """
+        try:
+            if (not title_prefix or title_prefix.strip() == "") and (not tags or len(tags) == 0):
+                return error.error_and_message(400, "搜索条件不能为空") + ({},)
+            
+            page_size = 10
+            
+            try:
+                page = max(1, int(page)) if page else 1
+            except (ValueError, TypeError):
+                return error.error_and_message(400, "页码参数无效") + ({},)
+            
+            skip = (page - 1) * page_size
+            
+            search_conditions = []
+            
+            if title_prefix and title_prefix.strip():
+                title_lower = title_prefix.strip().lower()
+                search_conditions.append({
+                    "search_index.title_lower": {"$regex": "^" + title_lower}
+                })
+            
+            if tags and len(tags) > 0:
+                # 标签精确或包含匹配
+                tags_lower = [tag.lower() for tag in tags if tag.strip()]
+                if tags_lower:
+                    search_conditions.append({
+                        "search_index.tags_lower": {"$in": tags_lower}
+                    })
+            
+            if not search_conditions:
+                return error.error_and_message(400, "搜索条件不能为空") + ({},)
+            
+            if len(search_conditions) == 1:
+                search_query = search_conditions[0]
+            else:
+                search_query = {"$and": search_conditions}
+            
+            if store_id and store_id.strip():
+                # 店铺内搜索
+                if not self.store_id_exist(store_id):
+                    return error.error_non_exist_store_id(store_id) + ({},)
+                
+                store_doc = self.db["Stores"].find_one({"_id": store_id}, {"inventory": 1})
+                if not store_doc or "inventory" not in store_doc:
+                    return 200, "ok", {
+                        "books": [],
+                        "pagination": {
+                            "page": page,
+                            "page_size": page_size,
+                            "total_count": 0,
+                            "total_pages": 0,
+                            "has_next": False,
+                            "has_prev": False
+                        }
+                    }
+                
+                book_ids = [item["book_id"] for item in store_doc["inventory"]]
+                if not book_ids:
+                    return 200, "ok", {
+                        "books": [],
+                        "pagination": {
+                            "page": page,
+                            "page_size": page_size,
+                            "total_count": 0,
+                            "total_pages": 0,
+                            "has_next": False,
+                            "has_prev": False
+                        }
+                    }
+                
+                # 添加店铺限制条件
+                search_query = {"$and": [search_query, {"_id": {"$in": book_ids}}]}
+            
+            total_count = self.db["Books"].count_documents(search_query)
+            books_cursor = self.db["Books"].find(search_query).skip(skip).limit(page_size)
+            
+            books = []
+            for book_doc in books_cursor:
+                book_info = {
+                    "id": book_doc["_id"],
+                    "title": book_doc.get("title", ""),
+                    "author": book_doc.get("author", ""),
+                    "book_intro": book_doc.get("book_intro", ""),
+                    "tags": book_doc.get("tags", [])
+                }
+                books.append(book_info)
+            
+            total_pages = (total_count + page_size - 1) // page_size
+            result = {
+                "books": books,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_count": total_count,
+                    "total_pages": total_pages,
+                    "has_next": page < total_pages,
+                    "has_prev": page > 1
+                }
+            }
+            
+        except pymongo.errors.PyMongoError as e:
+            code, msg, _ = error.exception_db_to_tuple3(e)
+            return code, msg, {}
+        except BaseException as e:
+            code, msg, _ = error.exception_to_tuple3(e)
+            return code, msg, {}
+        
+        return 200, "ok", result
+
+    def get_book_detail(self, book_id: str) -> (int, str, dict):
+        #  获取书籍详情信息
+        try:
+            if book_id is None or book_id.strip() == "":
+                return error.error_and_message(400, "书籍ID不能为空") + ({},)
+            
+            book_id = book_id.strip()
+            
+            book_doc = self.db["Books"].find_one({"_id": book_id})
+            if book_doc is None:
+                return error.error_and_message(404, "书籍不存在") + ({},)
+            
+            book_detail = {
+                "id": book_doc["_id"],
+                "title": book_doc.get("title", ""),
+                "author": book_doc.get("author", ""),
+                "publisher": book_doc.get("publisher", ""),
+                "original_title": book_doc.get("original_title", ""),
+                "translator": book_doc.get("translator", ""),
+                "pub_year": book_doc.get("pub_year", ""),
+                "pages": book_doc.get("pages", 0),
+                "price": book_doc.get("price", 0),
+                "currency_unit": book_doc.get("currency_unit", ""),
+                "binding": book_doc.get("binding", ""),
+                "isbn": book_doc.get("isbn", ""),
+                "author_intro": book_doc.get("author_intro", ""),
+                "book_intro": book_doc.get("book_intro", ""),
+                "content": book_doc.get("content", ""),
+                "tags": book_doc.get("tags", []),
+                "pictures": book_doc.get("pictures", [])
+            }
+            
+        except pymongo.errors.PyMongoError as e:
+            code, msg, _ = error.exception_db_to_tuple3(e)
+            return code, msg, {}
+        except BaseException as e:
+            code, msg, _ = error.exception_to_tuple3(e)
+            return code, msg, {}
+        
+        return 200, "ok", book_detail

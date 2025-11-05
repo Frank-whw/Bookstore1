@@ -89,3 +89,38 @@ class Buyer:
         r = requests.post(url, json=json)
         response_json = r.json()
         return r.status_code, response_json.get("cancelled_count", 0)
+
+    def search_books(self, keyword: str, store_id: str = None, page: int = 1) -> (int, dict):
+        json = {
+            "keyword": keyword,
+            "store_id": store_id,
+            "page": page,
+        }
+        url = urljoin(self.url_prefix, "search_books")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        response_json = r.json()
+        return r.status_code, response_json.get("result", {})
+
+    def search_books_advanced(self, title_prefix: str = None, tags: list = None, store_id: str = None, page: int = 1) -> (int, dict):
+        json = {
+            "title_prefix": title_prefix,
+            "tags": tags,
+            "store_id": store_id,
+            "page": page,
+        }
+        url = urljoin(self.url_prefix, "search_books_advanced")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        response_json = r.json()
+        return r.status_code, response_json.get("result", {})
+
+    def get_book_detail(self, book_id: str) -> (int, dict):
+        json = {
+            "book_id": book_id,
+        }
+        url = urljoin(self.url_prefix, "book_detail")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        response_json = r.json()
+        return r.status_code, response_json.get("result", {})
