@@ -1,5 +1,10 @@
 import logging
 import os
+import sys
+
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(root_dir)
+
 from flask import Flask
 from flask import Blueprint
 from flask import request
@@ -46,3 +51,7 @@ def be_run():
     app.register_blueprint(buyer.bp_buyer)
     init_completed_event.set()
     app.run()
+
+
+if __name__ == "__main__":
+    be_run()

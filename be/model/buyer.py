@@ -172,6 +172,13 @@ class Buyer(db_conn.DBConn):
                 return error.error_non_exist_user_id(user_id)
             if password != user_doc.get("password"):
                 return error.error_authorization_fail()
+            
+            # 转换add_value为整数
+            try:
+                add_value = int(add_value)
+            except (ValueError, TypeError):
+                return error.error_and_message(400, "充值金额必须是数字")
+                
             db["Users"].update_one({
                 "_id": user_id
             },{
