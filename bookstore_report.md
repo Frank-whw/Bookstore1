@@ -99,11 +99,7 @@
       "book_id": "book_001",
       "stock_level": 100,
       "price": 8500,
-      "book_info": {
-        "title": "数据库系统概念",
-        "tag": "数据库",
-        "content": "经典教材..."
-      }
+
     }
   ]
 }
