@@ -4,7 +4,6 @@ import logging
 import pymongo
 from be.model import error
 from be.model import db_conn
-from fe.access import book
 
 # encode a json string like:
 #   {
