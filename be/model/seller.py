@@ -188,8 +188,7 @@ class Seller(db_conn.DBConn):
                 stock_result = self.db["Stores"].update_one(
                     {
                         "_id": store_id,
-                        "inventory.book_id": book_id,
-                        "inventory.stock_level": {"$gte": quantity}
+                        "inventory.book_id": book_id
                     },
                     {
                         "$inc": {"inventory.$.stock_level": -quantity}
