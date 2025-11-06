@@ -164,13 +164,21 @@ class Buyer(db_conn.DBConn):
             except (ValueError, TypeError):
                 return error.error_and_message(400, "充值金额必须是数字")
 
-            if add_value <= 0:
-                return error.error_and_message(400, "充值金额必须为正数")
-                
-            db["Users"].update_one(
-                {"_id": user_id},
-                {"$inc": {"balance": add_value}}
-            )
+            # 允许负值作为扣款，但不允许余额变为负数
+            if add_value < 0:
+                # 原子性扣款：仅当余额 >= 需要扣减的绝对值时才扣款
+                result = db["Users"].update_one(
+                    {"_id": user_id, "balance": {"$gte": -add_value}},
+                    {"$inc": {"balance": add_value}}
+                )
+                if result.modified_count == 0:
+                    return error.error_and_message(400, "余额不足，扣款失败")
+            else:
+                # 正值或零：直接充值/不变
+                db["Users"].update_one(
+                    {"_id": user_id},
+                    {"$inc": {"balance": add_value}}
+                )
         except pymongo.errors.PyMongoError as e:
             code, msg, _ = error.exception_db_to_tuple3(e)
             return code, msg
