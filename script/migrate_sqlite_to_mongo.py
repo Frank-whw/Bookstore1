@@ -343,6 +343,7 @@ def create_indexes(mongo_db):
         mongo_db.Stores.create_index([("inventory.book_id", ASCENDING)])
         # Orders 复合索引 + 超时索引
         mongo_db.Orders.create_index([("buyer_id", ASCENDING), ("status", ASCENDING), ("create_time", -1)], name="orders_by_buyer_status_time")
+        mongo_db.Orders.create_index([("status", ASCENDING), ("create_time", ASCENDING)], name="orders_status_create_time")
         mongo_db.Orders.create_index([("status", ASCENDING), ("timeout_at", ASCENDING)], name="orders_timeout_scan")
         # Books 文本索引（集合只能有一个 text 索引）
         try:

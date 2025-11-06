@@ -16,7 +16,7 @@ class StoreMongoDB:
     - 索引：
         * Users.token (sparse)
         * Stores.user_id, Stores.inventory.book_id
-        * Orders (buyer_id, status, create_time) 复合索引；(status, timeout_at)
+        * Orders (buyer_id, status, create_time) 复合索引；(status, create_time)；(status, timeout_at)
         * Books 文本索引 + 前缀索引（title_lower、tags_lower）
     """
 
@@ -59,6 +59,8 @@ class StoreMongoDB:
             try:
                 # 复合索引：buyer_id + status + create_time（按时间倒序）
                 self.db.Orders.create_index([("buyer_id", ASCENDING), ("status", ASCENDING), ("create_time", -1)], name="orders_by_buyer_status_time")
+                # 未支付订单扫描索引
+                self.db.Orders.create_index([("status", ASCENDING), ("create_time", ASCENDING)], name="orders_status_create_time")
                 # 可选索引：状态超时扫描
                 self.db.Orders.create_index([("status", ASCENDING), ("timeout_at", ASCENDING)], name="orders_timeout_scan")
             except PyMongoError as e:
