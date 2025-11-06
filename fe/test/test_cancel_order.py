@@ -105,6 +105,48 @@ class TestCancelOrder:
         code = self.buyer.cancel_order(self.order_id)
         assert code != 200
 
+    def test_cancel_completed_order(self):
+        # 支付并发货与收货后，取消应失败（状态不允许）
+        code = self.buyer.add_funds(self.total_price)
+        assert code == 200
+        code = self.buyer.payment(self.order_id)
+        assert code == 200
+        code = self.seller.ship_order(self.order_id)
+        assert code == 200
+        # 模拟买家收货将订单置为 delivered
+        from fe.access.buyer import Buyer as BuyerClient
+        buyer_client = BuyerClient(conf.URL, self.buyer_id, self.password)
+        assert buyer_client.receive_order(self.order_id) == 200
+        # 尝试取消
+        code = self.buyer.cancel_order(self.order_id)
+        assert code != 200
+
+    def test_cancel_invalid_user(self):
+        # 修改为不存在用户以触发 511
+        self.buyer.user_id = self.buyer.user_id + "_x"
+        code = self.buyer.cancel_order(self.order_id)
+        assert code == 511
+
+    def test_cancel_paid_refund_rollback_on_missing_user(self):
+        # 支付后删除用户文档，触发退款失败分支和状态恢复逻辑
+        code = self.buyer.add_funds(self.total_price)
+        assert code == 200
+        code = self.buyer.payment(self.order_id)
+        assert code == 200
+
+        db = get_db()
+        # 删除买家用户文档，导致退款无法进行
+        db["Users"].delete_one({"_id": self.buyer_id})
+
+        code = self.buyer.cancel_order(self.order_id)
+        # 退款失败时返回 non exist user 511（模型设计如此）
+        assert code == 511
+
+        # 验证订单状态被恢复为 paid（因为退款失败回滚）
+        order_doc = db["Orders"].find_one({"_id": self.order_id})
+        assert order_doc["status"] == "paid"
+        assert "cancel_time" not in order_doc
+
     def test_auto_cancel_timeout_orders(self):
         # 修改创建时间来创建一个超时的订单
         timeout_seller_id = "test_timeout_seller_{}".format(str(uuid.uuid1()))

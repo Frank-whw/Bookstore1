@@ -4,6 +4,7 @@ from fe import conf
 from fe.test.gen_book_data import GenBook
 from fe.access.new_buyer import register_new_buyer
 from fe.access.book import Book
+from fe.access.new_seller import register_new_seller
 from be.model.store import get_db
 import uuid
 
@@ -81,6 +82,42 @@ class TestSearchBooks:
         code, result = self.buyer.search_books("小说", page="invalid")
         assert code != 200
 
+    def test_search_books_page_zero_and_negative(self):
+        # 页码为0或负数应归一化为1
+        code, result = self.buyer.search_books("小说", page=0)
+        assert code == 200
+        assert result["pagination"]["page"] == 1
+
+        code, result = self.buyer.search_books("小说", page=-5)
+        assert code == 200
+        assert result["pagination"]["page"] == 1
+
+    def test_search_books_overflow_page(self):
+        # 超过最后一页应返回空结果
+        code, first = self.buyer.search_books("小说")
+        assert code == 200
+        total_pages = first["pagination"]["total_pages"]
+        overflow_page = (total_pages or 0) + 10
+        code, result = self.buyer.search_books("小说", page=overflow_page)
+        assert code == 200
+        assert result["pagination"]["page"] == overflow_page
+        assert result["pagination"]["has_next"] is False
+        assert isinstance(result["books"], list) and len(result["books"]) == 0
+
+    def test_search_books_in_empty_store(self):
+        # 现有店铺但库存为空时，结果为空且返回200
+        empty_seller_id = f"empty_store_seller_{uuid.uuid1()}"
+        empty_store_id = f"empty_store_id_{uuid.uuid1()}"
+        empty_password = empty_seller_id
+        seller = register_new_seller(empty_seller_id, empty_password)
+        assert seller.create_store(empty_store_id) == 200
+
+        code, result = self.buyer.search_books("小说", store_id=empty_store_id)
+        assert code == 200
+        assert result["pagination"]["total_count"] == 0
+        assert result["pagination"]["total_pages"] == 0
+        assert isinstance(result["books"], list) and len(result["books"]) == 0
+
     def test_search_books_pagination_comprehensive(self):
         # 全面测试分页
         code, result = self.buyer.search_books("小说")
@@ -152,6 +189,43 @@ class TestSearchBooks:
     def test_search_books_advanced_empty_conditions(self):
         code, result = self.buyer.search_books_advanced()
         assert code != 200
+
+    def test_search_books_advanced_invalid_page(self):
+        code, result = self.buyer.search_books_advanced(title_prefix="小", page="invalid")
+        assert code != 200
+
+    def test_search_books_advanced_page_zero_and_negative(self):
+        code, result = self.buyer.search_books_advanced(title_prefix="小", page=0)
+        assert code == 200
+        assert result["pagination"]["page"] == 1
+
+        code, result = self.buyer.search_books_advanced(title_prefix="小", page=-2)
+        assert code == 200
+        assert result["pagination"]["page"] == 1
+
+    def test_search_books_advanced_overflow_page(self):
+        code, first = self.buyer.search_books_advanced(title_prefix="小")
+        assert code == 200
+        total_pages = first["pagination"]["total_pages"]
+        overflow_page = (total_pages or 0) + 10
+        code, result = self.buyer.search_books_advanced(title_prefix="小", page=overflow_page)
+        assert code == 200
+        assert result["pagination"]["page"] == overflow_page
+        assert result["pagination"]["has_next"] is False
+        assert isinstance(result["books"], list) and len(result["books"]) == 0
+
+    def test_search_books_advanced_empty_store(self):
+        empty_seller_id = f"empty_store_adv_seller_{uuid.uuid1()}"
+        empty_store_id = f"empty_store_adv_id_{uuid.uuid1()}"
+        empty_password = empty_seller_id
+        seller = register_new_seller(empty_seller_id, empty_password)
+        assert seller.create_store(empty_store_id) == 200
+
+        code, result = self.buyer.search_books_advanced(title_prefix="小", store_id=empty_store_id)
+        assert code == 200
+        assert result["pagination"]["total_count"] == 0
+        assert result["pagination"]["total_pages"] == 0
+        assert isinstance(result["books"], list) and len(result["books"]) == 0
 
     def test_search_books_advanced_in_store(self):
         # 店铺内搜索

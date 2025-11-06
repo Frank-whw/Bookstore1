@@ -27,3 +27,14 @@ class TestAddFunds:
         self.buyer.password = self.buyer.password + "_x"
         code = self.buyer.add_funds(10)
         assert code != 200
+
+    def test_non_numeric_input(self):
+        # 非数字字符串
+        code = self.buyer.add_funds("abc")
+        assert code != 200
+        # None 值
+        code = self.buyer.add_funds(None)
+        assert code != 200
+        # 可解析的数字字符串
+        code = self.buyer.add_funds("50")
+        assert code == 200

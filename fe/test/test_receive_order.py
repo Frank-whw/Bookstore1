@@ -113,6 +113,19 @@ class TestReceiveOrder:
         code = self.buyer.receive_order(self.order_id)
         assert code != 200
 
+    def test_non_exist_user_id(self):
+        # 修改为不存在用户以触发 511
+        self.buyer.user_id = self.buyer.user_id + "_x"
+        code = self.buyer.receive_order(self.order_id)
+        assert code == 511
+
+    def test_store_deleted_before_receive(self):
+        # 删除店铺文档以触发 513 分支
+        db = get_db()
+        db["Stores"].delete_one({"_id": self.store_id})
+        code = self.buyer.receive_order(self.order_id)
+        assert code == 513
+
     def test_seller_balance_increase(self):
         # 获取收货前卖家余额
         db = get_db()

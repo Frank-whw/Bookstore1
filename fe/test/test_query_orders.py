@@ -84,6 +84,27 @@ class TestQueryOrders:
             page1_ids = [order["order_id"] for order in result["orders"]]
             page2_ids = [order["order_id"] for order in result2["orders"]]
             assert len(set(page1_ids) & set(page2_ids)) == 0
+
+    def test_buyer_query_orders_invalid_page_type(self):
+        # 非数字页码
+        code, result = self.buyer.query_orders(page="not_number")
+        assert code != 200
+
+    def test_buyer_query_orders_zero_or_negative_page(self):
+        # 0 或 负数页码将被归一化为 1
+        code, result = self.buyer.query_orders(page=0)
+        assert code == 200
+        assert result["pagination"]["page"] == 1
+
+        code, result = self.buyer.query_orders(page=-3)
+        assert code == 200
+        assert result["pagination"]["page"] == 1
+
+    def test_buyer_query_orders_far_page_empty(self):
+        # 超大页码应返回空结果
+        code, result = self.buyer.query_orders(page=9999)
+        assert code == 200
+        assert len(result["orders"]) == 0
     def test_query_orders_invalid_user(self):
         self.buyer.user_id = self.buyer.user_id + "_x"
         code, result = self.buyer.query_orders()
