@@ -2,6 +2,7 @@ import pymongo
 import uuid
 import logging
 import time
+from pymongo import ReturnDocument
 from be.model import db_conn
 from be.model import error
 
@@ -24,8 +25,7 @@ class Buyer(db_conn.DBConn):
             total_amount = 0
             items = []
             for book_id, count in id_and_count:
-                # 获取店铺库存并匹配该书
-                # 使用 $elemMatch + 投影仅返回匹配的库存项
+                # 获取店铺库存并匹配该书，使用 $elemMatch + 投影仅返回匹配的库存项
                 store_doc = db["Stores"].find_one(
                     {"_id": store_id, "inventory": {"$elemMatch": {"book_id": book_id}}},
                     {"inventory.$": 1}
@@ -60,9 +60,6 @@ class Buyer(db_conn.DBConn):
                 }
                 if store_level < count:
                     return error.error_stock_level_low(book_id) + (order_id,)
-                # sqlite代码逻辑是这边直接更新库存，但是后面要涉及发货
-                # 所以更新库存的逻辑放在发货函数中
-
                 items.append({
                     "book_id": book_id,
                     "quantity": count,
@@ -129,19 +126,7 @@ class Buyer(db_conn.DBConn):
             )
             if res.matched_count == 0:
                 return error.error_not_sufficient_funds(order_id)
-            '''
-            sqlite这边的逻辑是：买家的balance直接 - total_amount,卖家的balance直接 + total_amount
-            如果涉及发货收货，逻辑应该要改一下：
-            1. 下单的时候扣款，收货的时候收款
-            2. 收货的时候扣款+收款
-
-            选择1
-            统一一下业务流程：
-            下单 买家扣款，发货 book的stock_level减少，收货 卖家收款
-            '''
-            # 删除重复扣款（已在上方完成一次扣款）
             # 更新订单状态
-            # sqlite的逻辑是直接删除订单，这里使用status记录订单状态
             updated = db["Orders"].update_one(
                 {"_id": order_id, "status": "unpaid"},
                 {"$set": {"status": "paid", "pay_time": time.time()}}
@@ -169,7 +154,7 @@ class Buyer(db_conn.DBConn):
             user_doc = db["Users"].find_one({"_id": user_id})
             if user_doc is None:
                 # sqlite这边是error.error_authorization_fail()，但我感觉是error_non_exist_user_id
-                return error.error_non_exist_user_id(user_id)
+                return error.error_non_exist_user_id(user_id) 
             if password != user_doc.get("password"):
                 return error.error_authorization_fail()
             
@@ -178,12 +163,14 @@ class Buyer(db_conn.DBConn):
                 add_value = int(add_value)
             except (ValueError, TypeError):
                 return error.error_and_message(400, "充值金额必须是数字")
+
+            if add_value <= 0:
+                return error.error_and_message(400, "充值金额必须为正数")
                 
-            db["Users"].update_one({
-                "_id": user_id
-            },{
-                "$inc":{"balance": add_value}
-            })
+            db["Users"].update_one(
+                {"_id": user_id},
+                {"$inc": {"balance": add_value}}
+            )
         except pymongo.errors.PyMongoError as e:
             code, msg, _ = error.exception_db_to_tuple3(e)
             return code, msg
@@ -352,30 +339,40 @@ class Buyer(db_conn.DBConn):
             status = order_doc.get("status")
             if status not in ["unpaid", "paid"]:
                 return error.error_and_message(400, "订单状态不允许取消")
-            
-            # 如果是已支付订单，需要退款
-            if status == "paid":
-                total_amount = order_doc.get("total_amount", 0)
-                result = self.db["Users"].update_one(
-                    {"_id": user_id},
-                    {"$inc": {"balance": total_amount}}
-                )
-                if result.modified_count == 0:
-                    return error.error_non_exist_user_id(user_id)
-            
-            result = self.db["Orders"].update_one(
-                {"_id": order_id, "status": status},
+
+            # 原子性更新订单状态，避免退款与状态变更不一致
+            updated_order = self.db["Orders"].find_one_and_update(
+                {"_id": order_id, "buyer_id": user_id, "status": status},
                 {
                     "$set": {
                         "status": "cancelled",
                         "cancel_time": time.time()
                     }
-                }
+                },
+                return_document=ReturnDocument.BEFORE
             )
-            
-            if result.modified_count == 0:
+
+            if updated_order is None:
                 return error.error_and_message(400, "订单状态已变更，取消失败")
-                
+
+            # 如果是已支付订单，需要退款
+            if updated_order.get("status") == "paid":
+                total_amount = updated_order.get("total_amount", 0)
+                refund_result = self.db["Users"].update_one(
+                    {"_id": user_id},
+                    {"$inc": {"balance": total_amount}}
+                )
+                if refund_result.modified_count == 0:
+                    # 尝试恢复订单状态，保持资金一致
+                    self.db["Orders"].update_one(
+                        {"_id": order_id, "status": "cancelled"},
+                        {
+                            "$set": {"status": "paid"},
+                            "$unset": {"cancel_time": ""}
+                        }
+                    )
+                    return error.error_non_exist_user_id(user_id)
+
         except pymongo.errors.PyMongoError as e:
             code, msg, _ = error.exception_db_to_tuple3(e)
             return code, msg

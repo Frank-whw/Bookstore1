@@ -123,10 +123,13 @@ class Seller(db_conn.DBConn):
 
     def ship_order(self, user_id: str, order_id: str) -> (int, str):
 
+        store_id = None
+        deducted_items = []
+        order_status_updated = False
         try:
             if not self.user_id_exist(user_id):
                 return error.error_non_exist_user_id(user_id)
-                
+
             if not self.order_id_exist(order_id):
                 return error.error_invalid_order_id(order_id)
                 
@@ -172,10 +175,11 @@ class Seller(db_conn.DBConn):
                     }
                 }
             )
-            
+
             if result.modified_count == 0:
                 return error.error_order_status_mismatch(order_id)
-            
+            order_status_updated = True
+
             # 发货后库存减少
             for item in items:
                 book_id = item["book_id"]
@@ -183,7 +187,7 @@ class Seller(db_conn.DBConn):
                 
                 stock_result = self.db["Stores"].update_one(
                     {
-                        "_id": store_id, 
+                        "_id": store_id,
                         "inventory.book_id": book_id,
                         "inventory.stock_level": {"$gte": quantity}
                     },
@@ -191,23 +195,59 @@ class Seller(db_conn.DBConn):
                         "$inc": {"inventory.$.stock_level": -quantity}
                     }
                 )
-                
+
                 # 库存减少失败，回滚订单状态
                 if stock_result.modified_count == 0:
-                    self.db["Orders"].update_one(
-                        {"_id": order_id, "status": "shipped"},
-                        {
-                            "$set": {"status": "paid"},
-                            "$unset": {"ship_time": ""}
-                        }
-                    )
+                    for deducted in deducted_items:
+                        self.db["Stores"].update_one(
+                            {"_id": store_id, "inventory.book_id": deducted["book_id"]},
+                            {"$inc": {"inventory.$.stock_level": deducted["quantity"]}}
+                        )
+                    if order_status_updated:
+                        self.db["Orders"].update_one(
+                            {"_id": order_id, "status": "shipped"},
+                            {
+                                "$set": {"status": "paid"},
+                                "$unset": {"ship_time": ""}
+                            }
+                        )
                     return error.error_stock_level_low(book_id)
-                
+
+                deducted_items.append({"book_id": book_id, "quantity": quantity})
+
         except pymongo.errors.PyMongoError as e:
+            if store_id is not None and deducted_items:
+                for deducted in deducted_items:
+                    self.db["Stores"].update_one(
+                        {"_id": store_id, "inventory.book_id": deducted["book_id"]},
+                        {"$inc": {"inventory.$.stock_level": deducted["quantity"]}}
+                    )
+            if order_status_updated:
+                self.db["Orders"].update_one(
+                    {"_id": order_id, "status": "shipped"},
+                    {
+                        "$set": {"status": "paid"},
+                        "$unset": {"ship_time": ""}
+                    }
+                )
             code, msg, _ = error.exception_db_to_tuple3(e)
             return code, msg
         except BaseException as e:
+            if store_id is not None and deducted_items:
+                for deducted in deducted_items:
+                    self.db["Stores"].update_one(
+                        {"_id": store_id, "inventory.book_id": deducted["book_id"]},
+                        {"$inc": {"inventory.$.stock_level": deducted["quantity"]}}
+                    )
+            if order_status_updated:
+                self.db["Orders"].update_one(
+                    {"_id": order_id, "status": "shipped"},
+                    {
+                        "$set": {"status": "paid"},
+                        "$unset": {"ship_time": ""}
+                    }
+                )
             code, msg, _ = error.exception_to_tuple3(e)
             return code, msg
-        
+
         return 200, "ok"
